@@ -2,7 +2,7 @@ name: saas-infra
 
 services:
   traefik:
-    image: traefik:v3.3
+    image: traefik:v2.11
     container_name: traefik
     restart: unless-stopped
     command:
