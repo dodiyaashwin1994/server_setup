@@ -23,13 +23,13 @@ services:
     env_file:
       - .env
     environment:
-      - DOCKER_API_VERSION=1.41
-      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_REGION=${AWS_REGION}
-      - GODADDY_API_KEY=${GODADDY_API_KEY}
-      - GODADDY_API_SECRET=${GODADDY_API_SECRET}
+      DOCKER_API_VERSION: "1.40"
+      CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      GODADDY_API_KEY: ${GODADDY_API_KEY}
+      GODADDY_API_SECRET: ${GODADDY_API_SECRET}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/letsencrypt:/letsencrypt

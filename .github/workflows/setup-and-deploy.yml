@@ -131,7 +131,7 @@ jobs:
               "RABBITMQ_PASSWORD": "saas_password",
               "REDIS_PASSWORD": "redis_password",
               "SERVICE_DOMAIN": "autoleaze.com",
-              "DOCKER_API_VERSION": "1.41",
+              "DOCKER_API_VERSION": "1.40",
           }
           with Path("rendered-infra/.env").open("w") as fh:
               for key in keys:
