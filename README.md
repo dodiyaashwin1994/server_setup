@@ -19,12 +19,19 @@ stack from this repo:
 Recommended: create this secret in the `server_setup` repo:
 
 ```text
-BOOTSTRAP_SSH_PRIVATE_KEY
+BOOTSTRAP_SSH_PRIVATE_KEY_BASE64
 ```
 
-The workflow also has an `ssh_private_key` input, but private keys are safer as
-GitHub secrets than as workflow inputs. The key must log in as the selected
-`user`, and that user must be able to run `sudo`.
+Create it from your Mac with:
+
+```bash
+base64 -i /path/to/server_private_key | tr -d '\n'
+```
+
+Raw `BOOTSTRAP_SSH_PRIVATE_KEY` is still supported, and the workflow also has an
+`ssh_private_key` input, but base64 avoids newline/copy-paste corruption. The
+key must be unencrypted, must log in as the selected `user`, and that user must
+be able to run `sudo`.
 
 ## Workflow Inputs
 

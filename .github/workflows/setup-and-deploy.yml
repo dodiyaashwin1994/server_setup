@@ -87,20 +87,11 @@ jobs:
 
       - name: Configure SSH key
         env:
+          SECRET_PRIVATE_KEY_BASE64: ${{ secrets.BOOTSTRAP_SSH_PRIVATE_KEY_BASE64 }}
           SECRET_PRIVATE_KEY: ${{ secrets.BOOTSTRAP_SSH_PRIVATE_KEY }}
           INPUT_PRIVATE_KEY: ${{ inputs.ssh_private_key }}
         run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          if [ -n "$SECRET_PRIVATE_KEY" ]; then
-            printf '%s\n' "$SECRET_PRIVATE_KEY" > ~/.ssh/bootstrap_key
-          elif [ -n "$INPUT_PRIVATE_KEY" ]; then
-            printf '%s\n' "$INPUT_PRIVATE_KEY" > ~/.ssh/bootstrap_key
-          else
-            echo "Provide BOOTSTRAP_SSH_PRIVATE_KEY secret or ssh_private_key input." >&2
-            exit 1
-          fi
-          chmod 600 ~/.ssh/bootstrap_key
+          bash scripts/configure-ssh-key.sh
 
       - name: Prepare server
         env:
