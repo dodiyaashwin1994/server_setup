@@ -128,7 +128,7 @@ jobs:
               "TRAEFIK_DASHBOARD_HOST": "traefik.autoleaze.com",
               "RABBITMQ_MANAGEMENT_HOST": "rabbitmq.autoleaze.com",
               "ACME_EMAIL": "admin@autoleaze.com",
-              "TRAEFIK_DASHBOARD_AUTH": "admin:$$apr1$$8j696f8a$$Gwy9O.XU.T6mK.X5S8G9R.",
+              "TRAEFIK_DASHBOARD_AUTH": "admin:$apr1$8j696f8a$Gwy9O.XU.T6mK.X5S8G9R.",
               "RABBITMQ_ERLANG_COOKIE": "secret_erlang_cookie",
               "MYSQL_ROOT_PASSWORD": "root_password",
               "MYSQL_APP_PASSWORD": "app_password",
@@ -140,6 +140,8 @@ jobs:
           with Path("rendered-infra/.env").open("w") as fh:
               for key in keys:
                   value = os.environ.get(key) or defaults.get(key, "")
+                  # Escape $ for Docker Compose interpolation
+                  value = value.replace('$', '$$')
                   fh.write(f"{key}={value}\n")
 
           definitions = Path("rendered-infra/rabbitmq/definitions.json")
