@@ -1,0 +1,44 @@
+{
+  "vhosts": [
+    {"name": "Account"},
+    {"name": "Audit"},
+    {"name": "Notification"},
+    {"name": "Workflow"},
+    {"name": "Menu"}
+  ],
+  "permissions": [
+    {"user": "${RABBITMQ_USERNAME}", "vhost": "Account", "configure": ".*", "write": ".*", "read": ".*"},
+    {"user": "${RABBITMQ_USERNAME}", "vhost": "Audit", "configure": ".*", "write": ".*", "read": ".*"},
+    {"user": "${RABBITMQ_USERNAME}", "vhost": "Notification", "configure": ".*", "write": ".*", "read": ".*"},
+    {"user": "${RABBITMQ_USERNAME}", "vhost": "Workflow", "configure": ".*", "write": ".*", "read": ".*"},
+    {"user": "${RABBITMQ_USERNAME}", "vhost": "Menu", "configure": ".*", "write": ".*", "read": ".*"}
+  ],
+  "queues": [
+    {"name": "workflow", "vhost": "Account", "durable": true, "auto_delete": false, "arguments": {}},
+    {"name": "notification", "vhost": "Account", "durable": true, "auto_delete": false, "arguments": {}},
+    {"name": "audit", "vhost": "Account", "durable": true, "auto_delete": false, "arguments": {}},
+    {"name": "document", "vhost": "Account", "durable": true, "auto_delete": false, "arguments": {}},
+    {"name": "account_setup_response", "vhost": "Account", "durable": true, "auto_delete": false, "arguments": {}},
+    {"name": "audit_log", "vhost": "Audit", "durable": true, "auto_delete": false, "arguments": {}},
+    {"name": "email", "vhost": "Notification", "durable": true, "auto_delete": false, "arguments": {}},
+    {"name": "sms", "vhost": "Notification", "durable": true, "auto_delete": false, "arguments": {}},
+    {"name": "whatsapp", "vhost": "Notification", "durable": true, "auto_delete": false, "arguments": {}},
+    {"name": "menu", "vhost": "Workflow", "durable": true, "auto_delete": false, "arguments": {}},
+    {"name": "menu", "vhost": "Menu", "durable": true, "auto_delete": false, "arguments": {}}
+  ],
+  "exchanges": [
+    {"name": "account_setup", "vhost": "Account", "type": "direct", "durable": true, "auto_delete": false, "internal": false, "arguments": {}},
+    {"name": "audit", "vhost": "Audit", "type": "direct", "durable": true, "auto_delete": false, "internal": false, "arguments": {}},
+    {"name": "notification", "vhost": "Notification", "type": "direct", "durable": true, "auto_delete": false, "internal": false, "arguments": {}}
+  ],
+  "bindings": [
+    {"source": "account_setup", "vhost": "Account", "destination": "workflow", "destination_type": "queue", "routing_key": "workflow", "arguments": {}},
+    {"source": "account_setup", "vhost": "Account", "destination": "notification", "destination_type": "queue", "routing_key": "notification", "arguments": {}},
+    {"source": "account_setup", "vhost": "Account", "destination": "audit", "destination_type": "queue", "routing_key": "audit", "arguments": {}},
+    {"source": "account_setup", "vhost": "Account", "destination": "document", "destination_type": "queue", "routing_key": "document", "arguments": {}},
+    {"source": "audit", "vhost": "Audit", "destination": "audit_log", "destination_type": "queue", "routing_key": "audit_log", "arguments": {}},
+    {"source": "notification", "vhost": "Notification", "destination": "email", "destination_type": "queue", "routing_key": "email", "arguments": {}},
+    {"source": "notification", "vhost": "Notification", "destination": "sms", "destination_type": "queue", "routing_key": "sms", "arguments": {}},
+    {"source": "notification", "vhost": "Notification", "destination": "whatsapp", "destination_type": "queue", "routing_key": "whatsapp", "arguments": {}}
+  ]
+}

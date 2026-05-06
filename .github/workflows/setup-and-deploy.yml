@@ -1,0 +1,173 @@
+name: Setup And Deploy Infra
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub environment to use
+        required: true
+        default: main
+        type: choice
+        options:
+          - dev
+          - qa
+          - uat
+          - main
+      host:
+        description: Server IP or hostname
+        required: true
+        type: string
+      user:
+        description: Existing SSH user with sudo access
+        required: true
+        default: root
+        type: string
+      port:
+        description: SSH port
+        required: true
+        default: "22"
+        type: string
+      ssh_private_key:
+        description: Optional private key. Prefer BOOTSTRAP_SSH_PRIVATE_KEY secret.
+        required: false
+        type: string
+      deploy_root:
+        description: Deployment root directory
+        required: true
+        default: /opt/saas
+        type: string
+      install_docker:
+        description: Install Docker and Docker Compose plugin
+        required: true
+        default: true
+        type: boolean
+      deploy_infra:
+        description: Deploy Traefik, MySQL, RabbitMQ, Redis, and Nginx
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  setup-and-deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      DEPLOY_ROOT: ${{ inputs.deploy_root }}
+      ACME_EMAIL: ${{ vars.ACME_EMAIL || 'admin@example.com' }}
+      TRAEFIK_DASHBOARD_HOST: ${{ vars.TRAEFIK_DASHBOARD_HOST }}
+      TRAEFIK_DASHBOARD_AUTH: ${{ secrets.TRAEFIK_DASHBOARD_AUTH }}
+      TRAEFIK_DNS_PROVIDER: ${{ vars.TRAEFIK_DNS_PROVIDER || 'cloudflare' }}
+      TRAEFIK_DNS_DELAY_BEFORE_CHECK: ${{ vars.TRAEFIK_DNS_DELAY_BEFORE_CHECK || '10' }}
+      CF_DNS_API_TOKEN: ${{ secrets.CF_DNS_API_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      GODADDY_API_KEY: ${{ secrets.GODADDY_API_KEY }}
+      GODADDY_API_SECRET: ${{ secrets.GODADDY_API_SECRET }}
+      MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+      MYSQL_APP_USER: ${{ secrets.MYSQL_APP_USER || 'saas' }}
+      MYSQL_APP_PASSWORD: ${{ secrets.MYSQL_APP_PASSWORD }}
+      MYSQL_DATABASE: ${{ vars.MYSQL_DATABASE || 'authorization' }}
+      MYSQL_BIND_ADDRESS: ${{ vars.MYSQL_BIND_ADDRESS || '127.0.0.1' }}
+      MYSQL_PORT: ${{ vars.MYSQL_PORT || '3306' }}
+      RABBITMQ_USERNAME: ${{ secrets.RABBITMQ_USERNAME || 'saas' }}
+      RABBITMQ_PASSWORD: ${{ secrets.RABBITMQ_PASSWORD }}
+      RABBITMQ_ERLANG_COOKIE: ${{ secrets.RABBITMQ_ERLANG_COOKIE }}
+      RABBITMQ_DEFAULT_VHOST: ${{ vars.RABBITMQ_DEFAULT_VHOST || 'Account' }}
+      RABBITMQ_MANAGEMENT_HOST: ${{ vars.RABBITMQ_MANAGEMENT_HOST }}
+      RABBITMQ_AMQP_BIND: ${{ vars.RABBITMQ_AMQP_BIND || '127.0.0.1:5672' }}
+      REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+      REDIS_BIND_ADDRESS: ${{ vars.REDIS_BIND_ADDRESS || '127.0.0.1' }}
+      REDIS_PORT: ${{ vars.REDIS_PORT || '6379' }}
+      REDIS_MAXMEMORY: ${{ vars.REDIS_MAXMEMORY || '512mb' }}
+      REDIS_MAXMEMORY_POLICY: ${{ vars.REDIS_MAXMEMORY_POLICY || 'allkeys-lru' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH key
+        env:
+          SECRET_PRIVATE_KEY: ${{ secrets.BOOTSTRAP_SSH_PRIVATE_KEY }}
+          INPUT_PRIVATE_KEY: ${{ inputs.ssh_private_key }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          if [ -n "$SECRET_PRIVATE_KEY" ]; then
+            printf '%s\n' "$SECRET_PRIVATE_KEY" > ~/.ssh/bootstrap_key
+          elif [ -n "$INPUT_PRIVATE_KEY" ]; then
+            printf '%s\n' "$INPUT_PRIVATE_KEY" > ~/.ssh/bootstrap_key
+          else
+            echo "Provide BOOTSTRAP_SSH_PRIVATE_KEY secret or ssh_private_key input." >&2
+            exit 1
+          fi
+          chmod 600 ~/.ssh/bootstrap_key
+
+      - name: Prepare server
+        env:
+          HOST: ${{ inputs.host }}
+          USER: ${{ inputs.user }}
+          PORT: ${{ inputs.port }}
+          INSTALL_DOCKER: ${{ inputs.install_docker }}
+        run: |
+          chmod +x scripts/bootstrap-server.sh
+          ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "mkdir -p /tmp/saas-server-setup"
+          scp -i ~/.ssh/bootstrap_key -P "$PORT" -o StrictHostKeyChecking=no \
+            scripts/bootstrap-server.sh \
+            "$USER@$HOST:/tmp/saas-server-setup/"
+          ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "
+            sudo DEPLOY_ROOT='$DEPLOY_ROOT' \
+              INSTALL_DOCKER='$INSTALL_DOCKER' \
+              SETUP_NGINX=true \
+              SETUP_TRAEFIK=true \
+              SETUP_MYSQL=true \
+              SETUP_RABBITMQ=true \
+              SETUP_REDIS=true \
+              SETUP_SERVICES=true \
+              bash /tmp/saas-server-setup/bootstrap-server.sh
+          "
+
+      - name: Render infra environment
+        if: ${{ inputs.deploy_infra }}
+        run: |
+          cp -R infra rendered-infra
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          keys = [
+              "ACME_EMAIL", "TRAEFIK_DASHBOARD_HOST", "TRAEFIK_DASHBOARD_AUTH",
+              "TRAEFIK_DNS_PROVIDER", "TRAEFIK_DNS_DELAY_BEFORE_CHECK",
+              "CF_DNS_API_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+              "AWS_REGION", "GODADDY_API_KEY", "GODADDY_API_SECRET",
+              "MYSQL_ROOT_PASSWORD", "MYSQL_APP_USER", "MYSQL_APP_PASSWORD",
+              "MYSQL_DATABASE", "MYSQL_BIND_ADDRESS", "MYSQL_PORT",
+              "RABBITMQ_USERNAME", "RABBITMQ_PASSWORD", "RABBITMQ_ERLANG_COOKIE",
+              "RABBITMQ_DEFAULT_VHOST", "RABBITMQ_MANAGEMENT_HOST", "RABBITMQ_AMQP_BIND",
+              "REDIS_PASSWORD", "REDIS_BIND_ADDRESS", "REDIS_PORT",
+              "REDIS_MAXMEMORY", "REDIS_MAXMEMORY_POLICY",
+          ]
+          with Path("rendered-infra/.env").open("w") as fh:
+              for key in keys:
+                  value = os.environ.get(key, "")
+                  fh.write(f"{key}={value}\n")
+
+          definitions = Path("rendered-infra/rabbitmq/definitions.json")
+          definitions.write_text(definitions.read_text().replace("${RABBITMQ_USERNAME}", os.environ.get("RABBITMQ_USERNAME", "saas")))
+          PY
+
+      - name: Deploy infra
+        if: ${{ inputs.deploy_infra }}
+        env:
+          HOST: ${{ inputs.host }}
+          USER: ${{ inputs.user }}
+          PORT: ${{ inputs.port }}
+        run: |
+          ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "mkdir -p '$DEPLOY_ROOT/infra'"
+          rsync -az --delete -e "ssh -i ~/.ssh/bootstrap_key -p $PORT -o StrictHostKeyChecking=no" \
+            rendered-infra/ "$USER@$HOST:$DEPLOY_ROOT/infra/"
+          ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "
+            docker network inspect public >/dev/null 2>&1 || docker network create public
+            cd '$DEPLOY_ROOT/infra'
+            docker compose up -d --remove-orphans
+            docker compose ps
+          "

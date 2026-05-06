@@ -1,9 +1,18 @@
 # Server Setup
 
-Manual GitHub Action for preparing a fresh Ubuntu server.
+Manual GitHub Action for preparing and deploying a fresh Ubuntu server.
 
 This setup action installs Docker, creates the shared `public` Docker network,
 and prepares selected deployment folders under `/opt/saas`.
+
+The `Setup And Deploy Infra` workflow can also deploy the shared infrastructure
+stack from this repo:
+
+- Traefik
+- MySQL
+- RabbitMQ
+- Redis
+- Nginx catch-all UI router
 
 ## SSH Key
 
@@ -35,3 +44,12 @@ GitHub secrets than as workflow inputs. The key must log in as the selected
 
 The setup action prepares the server. Individual repos still deploy their own
 containers and config using the configured SSH user, for example `root`.
+
+## Single Repo Infra Deploy
+
+Use `.github/workflows/setup-and-deploy.yml` when you want one button to both
+bootstrap the server and start shared infrastructure. It expects environment
+secrets/variables for MySQL, RabbitMQ, Redis, and Traefik DNS challenge.
+
+Service repositories still deploy `authorization`, `workflow`, `notification`,
+`audit`, and `document` individually.

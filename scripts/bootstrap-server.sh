@@ -39,10 +39,18 @@ fi
 mkdir -p "$DEPLOY_ROOT"
 
 if [ "$SETUP_TRAEFIK" = "true" ]; then
+  mkdir -p "${DEPLOY_ROOT}/infra/traefik/letsencrypt"
+  touch "${DEPLOY_ROOT}/infra/traefik/letsencrypt/acme.json"
+  chmod 600 "${DEPLOY_ROOT}/infra/traefik/letsencrypt/acme.json"
   mkdir -p "${DEPLOY_ROOT}/traefik/letsencrypt"
   touch "${DEPLOY_ROOT}/traefik/letsencrypt/acme.json"
   chmod 600 "${DEPLOY_ROOT}/traefik/letsencrypt/acme.json"
 fi
+
+[ "$SETUP_MYSQL" = "true" ] && mkdir -p "${DEPLOY_ROOT}/infra/mysql/initdb"
+[ "$SETUP_RABBITMQ" = "true" ] && mkdir -p "${DEPLOY_ROOT}/infra/rabbitmq"
+[ "$SETUP_REDIS" = "true" ] && mkdir -p "${DEPLOY_ROOT}/infra/redis"
+[ "$SETUP_NGINX" = "true" ] && mkdir -p "${DEPLOY_ROOT}/infra/nginx/html"
 
 [ "$SETUP_MYSQL" = "true" ] && mkdir -p "${DEPLOY_ROOT}/mysql"
 [ "$SETUP_RABBITMQ" = "true" ] && mkdir -p "${DEPLOY_ROOT}/rabbitmq"
