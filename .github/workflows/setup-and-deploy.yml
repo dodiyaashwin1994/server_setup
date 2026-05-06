@@ -124,7 +124,10 @@ jobs:
                   fh.write(f"{key}={value}\n")
 
           definitions = Path("rendered-infra/rabbitmq/definitions.json")
-          definitions.write_text(definitions.read_text().replace("${RABBITMQ_USERNAME}", os.environ.get("RABBITMQ_USERNAME", "saas")))
+          content = definitions.read_text()
+          content = content.replace("${RABBITMQ_USERNAME}", os.environ.get("RABBITMQ_USERNAME", "saas"))
+          content = content.replace("${RABBITMQ_PASSWORD}", os.environ.get("RABBITMQ_PASSWORD", "saas"))
+          definitions.write_text(content)
           PY
 
       - name: Deploy infra

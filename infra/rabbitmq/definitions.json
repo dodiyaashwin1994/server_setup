@@ -1,4 +1,7 @@
 {
+  "users": [
+    {"name": "${RABBITMQ_USERNAME}", "password": "${RABBITMQ_PASSWORD}", "tags": "administrator"}
+  ],
   "vhosts": [
     {"name": "Account"},
     {"name": "Audit"},
