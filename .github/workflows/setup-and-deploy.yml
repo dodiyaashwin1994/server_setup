@@ -119,7 +119,7 @@ jobs:
               "RABBITMQ_DEFAULT_VHOST", "RABBITMQ_MANAGEMENT_HOST", "RABBITMQ_AMQP_BIND",
               "REDIS_PASSWORD", "REDIS_BIND_ADDRESS", "REDIS_PORT",
               "REDIS_MAXMEMORY", "REDIS_MAXMEMORY_POLICY",
-              "SERVICE_DOMAIN", "FRONTEND_DOMAINS",
+              "SERVICE_DOMAIN", "FRONTEND_DOMAINS", "DOCKER_API_VERSION",
           ]
           defaults = {
               "TRAEFIK_DASHBOARD_HOST": "traefik.autoleaze.com",
@@ -131,6 +131,7 @@ jobs:
               "RABBITMQ_PASSWORD": "saas_password",
               "REDIS_PASSWORD": "redis_password",
               "SERVICE_DOMAIN": "autoleaze.com",
+              "DOCKER_API_VERSION": "1.41",
           }
           with Path("rendered-infra/.env").open("w") as fh:
               for key in keys:
