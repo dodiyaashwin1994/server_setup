@@ -10,13 +10,16 @@ services:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
       - --entrypoints.web.address=:80
-      - --entrypoints.web.http.redirections.entrypoint.to=websecure
-      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      # Global redirection to HTTPS is moved to a per-router basis to allow localhost exemption
       - --entrypoints.websecure.address=:443
+      - --log.level=DEBUG
       - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
       - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
-      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
-      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      # Use DNS-01 Challenge for Wildcard SSL
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge=true
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.delayBeforeCheck=0
     ports:
       - "80:80"
       - "443:443"
@@ -35,12 +38,26 @@ services:
       - ./traefik/letsencrypt:/letsencrypt
     labels:
       - traefik.enable=true
+      # HTTP -> HTTPS Redirection Middleware
+      - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
+      - traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true
+
+      # Traefik Dashboard Router (HTTPS)
       - traefik.http.routers.traefik.rule=Host(`${TRAEFIK_DASHBOARD_HOST}`)
       - traefik.http.routers.traefik.entrypoints=websecure
-      - traefik.http.routers.traefik.tls.certresolver=letsencrypt
       - traefik.http.routers.traefik.service=api@internal
       - traefik.http.routers.traefik.middlewares=traefik-auth
-      - traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_DASHBOARD_AUTH}
+      - traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_DASHBOARD_AUTH:-admin:$$2y$$05$$j9k9P.V3EshvT7psMo9E0.XU.T6mK.X5S8G9R.}
+      
+      # SSL Configuration for Wildcard
+      - traefik.http.routers.traefik.tls.certresolver=letsencrypt
+      - traefik.http.routers.traefik.tls.domains[0].main=${SERVICE_DOMAIN:-autoleze.com}
+      - traefik.http.routers.traefik.tls.domains[0].sans=*.${SERVICE_DOMAIN:-autoleze.com}
+
+      # Catch-all HTTP -> HTTPS redirect (excluding localhost)
+      - traefik.http.routers.http-catchall.rule=HostRegexp(`{host:.+}`) && !Host(`localhost`) && !Host(`127.0.0.1`)
+      - traefik.http.routers.http-catchall.entrypoints=web
+      - traefik.http.routers.http-catchall.middlewares=redirect-to-https
     networks:
       - public
 
@@ -126,11 +143,17 @@ services:
       - ./nginx/html:/usr/share/nginx/html:ro
     labels:
       - traefik.enable=true
+      # Secure Router for all domains (uses Wildcard SSL)
       - traefik.http.routers.nginx.rule=HostRegexp(`{host:.+}`)
       - traefik.http.routers.nginx.entrypoints=websecure
       - traefik.http.routers.nginx.tls.certresolver=letsencrypt
-      # DYNAMIC_DOMAINS_PLACEHOLDER
       - traefik.http.routers.nginx.priority=1
+      
+      # Localhost Router for port 80 (No HTTPS)
+      - traefik.http.routers.nginx-local.rule=Host(`localhost`) || Host(`127.0.0.1`)
+      - traefik.http.routers.nginx-local.entrypoints=web
+      - traefik.http.routers.nginx-local.priority=2
+
       - traefik.http.services.nginx.loadbalancer.server.port=80
     networks:
       - public
