@@ -39,7 +39,7 @@ jobs:
       PORT: ${{ secrets.SERVER_PORT || '22' }}
       DEPLOY_ROOT: ${{ inputs.deploy_root }}
       ACME_EMAIL: ${{ vars.ACME_EMAIL || 'admin@example.com' }}
-      TRAEFIK_DASHBOARD_HOST: ${{ vars.TRAEFIK_DASHBOARD_HOST }}
+      TRAEFIK_DASHBOARD_HOST: ${{ secrets.TRAEFIK_DASHBOARD_HOST }}
       TRAEFIK_DASHBOARD_AUTH: ${{ secrets.TRAEFIK_DASHBOARD_AUTH }}
       TRAEFIK_DNS_PROVIDER: ${{ vars.TRAEFIK_DNS_PROVIDER || 'cloudflare' }}
       TRAEFIK_DNS_DELAY_BEFORE_CHECK: ${{ vars.TRAEFIK_DNS_DELAY_BEFORE_CHECK || '10' }}
@@ -59,13 +59,15 @@ jobs:
       RABBITMQ_PASSWORD: ${{ secrets.RABBITMQ_PASSWORD }}
       RABBITMQ_ERLANG_COOKIE: ${{ secrets.RABBITMQ_ERLANG_COOKIE }}
       RABBITMQ_DEFAULT_VHOST: ${{ vars.RABBITMQ_DEFAULT_VHOST || 'Account' }}
-      RABBITMQ_MANAGEMENT_HOST: ${{ vars.RABBITMQ_MANAGEMENT_HOST }}
+      RABBITMQ_MANAGEMENT_HOST: ${{ secrets.RABBITMQ_MANAGEMENT_HOST }}
       RABBITMQ_AMQP_BIND: ${{ vars.RABBITMQ_AMQP_BIND || '127.0.0.1:5672' }}
       REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
       REDIS_BIND_ADDRESS: ${{ vars.REDIS_BIND_ADDRESS || '127.0.0.1' }}
       REDIS_PORT: ${{ vars.REDIS_PORT || '6379' }}
       REDIS_MAXMEMORY: ${{ vars.REDIS_MAXMEMORY || '512mb' }}
       REDIS_MAXMEMORY_POLICY: ${{ vars.REDIS_MAXMEMORY_POLICY || 'allkeys-lru' }}
+      SERVICE_DOMAIN: ${{ vars.SERVICE_DOMAIN || 'autoleaze.com' }}
+      FRONTEND_DOMAINS: ${{ vars.FRONTEND_DOMAINS || 'autoleaze.com' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -117,13 +119,18 @@ jobs:
               "RABBITMQ_DEFAULT_VHOST", "RABBITMQ_MANAGEMENT_HOST", "RABBITMQ_AMQP_BIND",
               "REDIS_PASSWORD", "REDIS_BIND_ADDRESS", "REDIS_PORT",
               "REDIS_MAXMEMORY", "REDIS_MAXMEMORY_POLICY",
+              "SERVICE_DOMAIN", "FRONTEND_DOMAINS",
           ]
           defaults = {
+              "TRAEFIK_DASHBOARD_HOST": "traefik.autoleaze.com",
+              "RABBITMQ_MANAGEMENT_HOST": "rabbitmq.autoleaze.com",
+              "ACME_EMAIL": "admin@autoleaze.com",
               "RABBITMQ_ERLANG_COOKIE": "secret_erlang_cookie",
               "MYSQL_ROOT_PASSWORD": "root_password",
               "MYSQL_APP_PASSWORD": "app_password",
               "RABBITMQ_PASSWORD": "saas_password",
               "REDIS_PASSWORD": "redis_password",
+              "SERVICE_DOMAIN": "autoleaze.com",
           }
           with Path("rendered-infra/.env").open("w") as fh:
               for key in keys:
@@ -137,6 +144,20 @@ jobs:
           content = content.replace("${RABBITMQ_USERNAME}", user)
           content = content.replace("${RABBITMQ_PASSWORD}", pw)
           definitions.write_text(content)
+
+          # Generate dynamic domains for Wildcard SSL
+          frontend_domains = os.environ.get("FRONTEND_DOMAINS") or defaults.get("SERVICE_DOMAIN")
+          domain_labels = []
+          for i, domain in enumerate(frontend_domains.split(",")):
+              domain = domain.strip()
+              if domain:
+                  domain_labels.append(f"      - traefik.http.routers.nginx.tls.domains[{i}].main={domain}")
+                  domain_labels.append(f"      - traefik.http.routers.nginx.tls.domains[{i}].sans=*.{domain}")
+          
+          dc_path = Path("rendered-infra/docker-compose.yml")
+          dc_content = dc_path.read_text()
+          dc_content = dc_content.replace("# DYNAMIC_DOMAINS_PLACEHOLDER", "\n".join(domain_labels))
+          dc_path.write_text(dc_content)
           PY
 
       - name: Deploy infra
