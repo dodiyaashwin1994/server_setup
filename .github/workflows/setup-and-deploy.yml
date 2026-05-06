@@ -118,15 +118,24 @@ jobs:
               "REDIS_PASSWORD", "REDIS_BIND_ADDRESS", "REDIS_PORT",
               "REDIS_MAXMEMORY", "REDIS_MAXMEMORY_POLICY",
           ]
+          defaults = {
+              "RABBITMQ_ERLANG_COOKIE": "secret_erlang_cookie",
+              "MYSQL_ROOT_PASSWORD": "root_password",
+              "MYSQL_APP_PASSWORD": "app_password",
+              "RABBITMQ_PASSWORD": "saas_password",
+              "REDIS_PASSWORD": "redis_password",
+          }
           with Path("rendered-infra/.env").open("w") as fh:
               for key in keys:
-                  value = os.environ.get(key, "")
+                  value = os.environ.get(key) or defaults.get(key, "")
                   fh.write(f"{key}={value}\n")
 
           definitions = Path("rendered-infra/rabbitmq/definitions.json")
           content = definitions.read_text()
-          content = content.replace("${RABBITMQ_USERNAME}", os.environ.get("RABBITMQ_USERNAME", "saas"))
-          content = content.replace("${RABBITMQ_PASSWORD}", os.environ.get("RABBITMQ_PASSWORD", "saas"))
+          user = os.environ.get("RABBITMQ_USERNAME") or "saas"
+          pw = os.environ.get("RABBITMQ_PASSWORD") or defaults.get("RABBITMQ_PASSWORD")
+          content = content.replace("${RABBITMQ_USERNAME}", user)
+          content = content.replace("${RABBITMQ_PASSWORD}", pw)
           definitions.write_text(content)
           PY
 

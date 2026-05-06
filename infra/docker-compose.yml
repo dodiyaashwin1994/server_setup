@@ -38,7 +38,7 @@ services:
       - public
 
   mysql:
-    image: mysql:8.4
+    image: mysql:8.0
     container_name: mysql
     restart: unless-stopped
     environment:
@@ -49,11 +49,11 @@ services:
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
-      - --mysql-native-password=ON
+      - --default-authentication-plugin=mysql_native_password
     ports:
       - "${MYSQL_BIND_ADDRESS:-127.0.0.1}:${MYSQL_PORT:-3306}:3306"
     volumes:
-      - mysql_data:/var/lib/mysql
+      - mysql_db_data:/var/lib/mysql
       - ./mysql/initdb:/docker-entrypoint-initdb.d:ro
     networks:
       public:
@@ -73,7 +73,7 @@ services:
     ports:
       - "${RABBITMQ_AMQP_BIND:-127.0.0.1:5672}:5672"
     volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
+      - rabbitmq_db_data:/var/lib/rabbitmq
       - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
       - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
     labels:
@@ -128,6 +128,6 @@ networks:
     external: true
 
 volumes:
-  mysql_data:
-  rabbitmq_data:
+  mysql_db_data:
+  rabbitmq_db_data:
   redis_data:
