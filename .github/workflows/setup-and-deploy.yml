@@ -144,20 +144,6 @@ jobs:
           content = content.replace("${RABBITMQ_USERNAME}", user)
           content = content.replace("${RABBITMQ_PASSWORD}", pw)
           definitions.write_text(content)
-
-          # Generate dynamic domains for Wildcard SSL
-          frontend_domains = os.environ.get("FRONTEND_DOMAINS") or defaults.get("SERVICE_DOMAIN")
-          domain_labels = []
-          for i, domain in enumerate(frontend_domains.split(",")):
-              domain = domain.strip()
-              if domain:
-                  domain_labels.append(f"      - traefik.http.routers.nginx.tls.domains[{i}].main={domain}")
-                  domain_labels.append(f"      - traefik.http.routers.nginx.tls.domains[{i}].sans=*.{domain}")
-          
-          dc_path = Path("rendered-infra/docker-compose.yml")
-          dc_content = dc_path.read_text()
-          dc_content = dc_content.replace("# DYNAMIC_DOMAINS_PLACEHOLDER", "\n".join(domain_labels))
-          dc_path.write_text(dc_content)
           PY
 
       - name: Deploy infra
