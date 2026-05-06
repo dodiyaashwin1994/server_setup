@@ -140,8 +140,8 @@ jobs:
           with Path("rendered-infra/.env").open("w") as fh:
               for key in keys:
                   value = os.environ.get(key) or defaults.get(key, "")
-                  # Escape $ for Docker Compose interpolation
-                  value = value.replace('$', '$$')
+                  # Escape $ with $$$$ to survive double interpolation in Docker Compose
+                  value = value.replace('$', '$$$$')
                   fh.write(f"{key}={value}\n")
 
           definitions = Path("rendered-infra/rabbitmq/definitions.json")
