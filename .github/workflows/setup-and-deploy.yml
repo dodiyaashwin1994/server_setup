@@ -1,6 +1,9 @@
 name: Setup And Deploy Infra
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       environment:
@@ -32,12 +35,12 @@ on:
 jobs:
   setup-and-deploy:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    environment: ${{ github.event.inputs.environment || 'main' }}
     env:
       HOST: ${{ secrets.SERVER_HOST }}
       USER: ${{ secrets.SERVER_USER }}
       PORT: ${{ secrets.SERVER_PORT || '22' }}
-      DEPLOY_ROOT: ${{ inputs.deploy_root }}
+      DEPLOY_ROOT: ${{ github.event.inputs.deploy_root || '/opt/saas' }}
       ACME_EMAIL: ${{ vars.ACME_EMAIL || 'admin@example.com' }}
       TRAEFIK_DASHBOARD_HOST: ${{ secrets.TRAEFIK_DASHBOARD_HOST }}
       TRAEFIK_DASHBOARD_AUTH: ${{ secrets.TRAEFIK_DASHBOARD_AUTH }}
@@ -81,7 +84,7 @@ jobs:
 
       - name: Prepare server
         env:
-          INSTALL_DOCKER: ${{ inputs.install_docker }}
+          INSTALL_DOCKER: ${{ github.event.inputs.install_docker || 'true' }}
         run: |
           chmod +x scripts/bootstrap-server.sh
           ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "mkdir -p /tmp/saas-server-setup"
@@ -101,7 +104,7 @@ jobs:
           "
 
       - name: Render infra environment
-        if: ${{ inputs.deploy_infra }}
+        if: ${{ github.event.inputs.deploy_infra || true }}
         run: |
           cp -R infra rendered-infra
           python3 - <<'PY'
@@ -148,7 +151,7 @@ jobs:
           PY
 
       - name: Deploy infra
-        if: ${{ inputs.deploy_infra }}
+        if: ${{ github.event.inputs.deploy_infra || true }}
         run: |
           ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "mkdir -p '$DEPLOY_ROOT/infra'"
           rsync -az --delete -e "ssh -i ~/.ssh/bootstrap_key -p $PORT -o StrictHostKeyChecking=no" \
