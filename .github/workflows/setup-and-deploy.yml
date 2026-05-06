@@ -156,6 +156,6 @@ jobs:
           ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "
             docker network inspect public >/dev/null 2>&1 || docker network create public
             cd '$DEPLOY_ROOT/infra'
-            docker compose up -d --remove-orphans
+            docker compose up -d --remove-orphans --force-recreate
             docker compose ps
           "
