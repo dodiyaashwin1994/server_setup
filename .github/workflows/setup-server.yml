@@ -1,0 +1,162 @@
+name: Setup Server
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub environment to use
+        required: true
+        default: main
+        type: choice
+        options:
+          - dev
+          - qa
+          - uat
+          - main
+      host:
+        description: Server IP or hostname
+        required: true
+        type: string
+      user:
+        description: Existing SSH user with sudo access
+        required: true
+        default: root
+        type: string
+      port:
+        description: SSH port
+        required: true
+        default: "22"
+        type: string
+      ssh_private_key:
+        description: Optional private key. Prefer BOOTSTRAP_SSH_PRIVATE_KEY secret.
+        required: false
+        type: string
+      deploy_root:
+        description: Deployment root directory
+        required: true
+        default: /opt/saas
+        type: string
+      install_docker:
+        description: Install Docker and Docker Compose plugin
+        required: true
+        default: true
+        type: boolean
+      setup_nginx:
+        description: Prepare Nginx UI deployment folder
+        required: true
+        default: true
+        type: boolean
+      setup_traefik:
+        description: Prepare Traefik deployment folder
+        required: true
+        default: true
+        type: boolean
+      setup_mysql:
+        description: Prepare MySQL deployment folder
+        required: true
+        default: true
+        type: boolean
+      setup_rabbitmq:
+        description: Prepare RabbitMQ deployment folder
+        required: true
+        default: true
+        type: boolean
+      setup_redis:
+        description: Prepare Redis deployment folder
+        required: true
+        default: true
+        type: boolean
+      setup_services:
+        description: Prepare application service folders
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH key
+        env:
+          SECRET_PRIVATE_KEY: ${{ secrets.BOOTSTRAP_SSH_PRIVATE_KEY }}
+          INPUT_PRIVATE_KEY: ${{ inputs.ssh_private_key }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          if [ -n "$SECRET_PRIVATE_KEY" ]; then
+            printf '%s\n' "$SECRET_PRIVATE_KEY" > ~/.ssh/bootstrap_key
+          elif [ -n "$INPUT_PRIVATE_KEY" ]; then
+            printf '%s\n' "$INPUT_PRIVATE_KEY" > ~/.ssh/bootstrap_key
+          else
+            echo "Provide BOOTSTRAP_SSH_PRIVATE_KEY secret or ssh_private_key input." >&2
+            exit 1
+          fi
+          chmod 600 ~/.ssh/bootstrap_key
+
+      - name: Prepare setup payload
+        run: |
+          chmod +x scripts/bootstrap-server.sh
+
+      - name: Copy setup files
+        env:
+          HOST: ${{ inputs.host }}
+          USER: ${{ inputs.user }}
+          PORT: ${{ inputs.port }}
+        run: |
+          ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "mkdir -p /tmp/saas-server-setup"
+          scp -i ~/.ssh/bootstrap_key -P "$PORT" -o StrictHostKeyChecking=no \
+            scripts/bootstrap-server.sh \
+            "$USER@$HOST:/tmp/saas-server-setup/"
+
+      - name: Install Docker
+        if: ${{ inputs.install_docker }}
+        env:
+          HOST: ${{ inputs.host }}
+          USER: ${{ inputs.user }}
+          PORT: ${{ inputs.port }}
+          DEPLOY_ROOT: ${{ inputs.deploy_root }}
+        run: |
+          ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" \
+            "sudo DEPLOY_ROOT='$DEPLOY_ROOT' INSTALL_DOCKER=true PREPARE_ALL=false bash /tmp/saas-server-setup/bootstrap-server.sh"
+
+      - name: Prepare selected folders
+        env:
+          HOST: ${{ inputs.host }}
+          USER: ${{ inputs.user }}
+          PORT: ${{ inputs.port }}
+          DEPLOY_ROOT: ${{ inputs.deploy_root }}
+          SETUP_NGINX: ${{ inputs.setup_nginx }}
+          SETUP_TRAEFIK: ${{ inputs.setup_traefik }}
+          SETUP_MYSQL: ${{ inputs.setup_mysql }}
+          SETUP_RABBITMQ: ${{ inputs.setup_rabbitmq }}
+          SETUP_REDIS: ${{ inputs.setup_redis }}
+          SETUP_SERVICES: ${{ inputs.setup_services }}
+        run: |
+          ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "
+            sudo DEPLOY_ROOT='$DEPLOY_ROOT' \
+              SETUP_NGINX='$SETUP_NGINX' \
+              SETUP_TRAEFIK='$SETUP_TRAEFIK' \
+              SETUP_MYSQL='$SETUP_MYSQL' \
+              SETUP_RABBITMQ='$SETUP_RABBITMQ' \
+              SETUP_REDIS='$SETUP_REDIS' \
+              SETUP_SERVICES='$SETUP_SERVICES' \
+              bash /tmp/saas-server-setup/bootstrap-server.sh
+          "
+
+      - name: Verify setup
+        env:
+          HOST: ${{ inputs.host }}
+          USER: ${{ inputs.user }}
+          PORT: ${{ inputs.port }}
+          INSTALL_DOCKER: ${{ inputs.install_docker }}
+        run: |
+          ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "
+            if [ '$INSTALL_DOCKER' = 'true' ]; then
+              docker ps >/dev/null
+              docker compose version
+              docker network inspect public >/dev/null
+            fi
+          "
