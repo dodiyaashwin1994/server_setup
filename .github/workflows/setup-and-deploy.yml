@@ -13,24 +13,6 @@ on:
           - qa
           - uat
           - main
-      host:
-        description: Server IP or hostname
-        required: true
-        type: string
-      user:
-        description: Existing SSH user with sudo access
-        required: true
-        default: root
-        type: string
-      port:
-        description: SSH port
-        required: true
-        default: "22"
-        type: string
-      ssh_private_key:
-        description: Optional private key. Prefer BOOTSTRAP_SSH_PRIVATE_KEY secret.
-        required: false
-        type: string
       deploy_root:
         description: Deployment root directory
         required: true
@@ -52,6 +34,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     env:
+      HOST: ${{ secrets.SERVER_HOST }}
+      USER: ${{ secrets.SERVER_USER }}
+      PORT: ${{ secrets.SERVER_PORT || '22' }}
       DEPLOY_ROOT: ${{ inputs.deploy_root }}
       ACME_EMAIL: ${{ vars.ACME_EMAIL || 'admin@example.com' }}
       TRAEFIK_DASHBOARD_HOST: ${{ vars.TRAEFIK_DASHBOARD_HOST }}
@@ -89,15 +74,11 @@ jobs:
         env:
           SECRET_PRIVATE_KEY_BASE64: ${{ secrets.BOOTSTRAP_SSH_PRIVATE_KEY_BASE64 }}
           SECRET_PRIVATE_KEY: ${{ secrets.BOOTSTRAP_SSH_PRIVATE_KEY }}
-          INPUT_PRIVATE_KEY: ${{ inputs.ssh_private_key }}
         run: |
           bash scripts/configure-ssh-key.sh
 
       - name: Prepare server
         env:
-          HOST: ${{ inputs.host }}
-          USER: ${{ inputs.user }}
-          PORT: ${{ inputs.port }}
           INSTALL_DOCKER: ${{ inputs.install_docker }}
         run: |
           chmod +x scripts/bootstrap-server.sh
@@ -148,10 +129,6 @@ jobs:
 
       - name: Deploy infra
         if: ${{ inputs.deploy_infra }}
-        env:
-          HOST: ${{ inputs.host }}
-          USER: ${{ inputs.user }}
-          PORT: ${{ inputs.port }}
         run: |
           ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "mkdir -p '$DEPLOY_ROOT/infra'"
           rsync -az --delete -e "ssh -i ~/.ssh/bootstrap_key -p $PORT -o StrictHostKeyChecking=no" \
