@@ -14,29 +14,10 @@ services:
       - "443:443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
       - ./traefik/acme:/etc/traefik/acme
-    command:
-      - "--api.dashboard=true"
-      - "--providers.docker=true"
-      - "--providers.docker.endpoint=unix:///var/run/docker.sock"
-      - "--providers.docker.apiversion=1.40"
-      - "--providers.docker.exposedbydefault=false"
-      - "--providers.docker.network=public"
-      - "--providers.file.filename=/etc/traefik/dynamic.yml"
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
-      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
-      - "--entrypoints.websecure.address=:443"
-      - "--entrypoints.websecure.http.tls.certresolver=cloudflare"
-      - "--entrypoints.websecure.http.tls.domains[0].main=${SERVICE_DOMAIN}"
-      - "--entrypoints.websecure.http.tls.domains[0].sans=*.${SERVICE_DOMAIN}"
-      - "--certificatesresolvers.cloudflare.acme.email=${ACME_EMAIL}"
-      - "--certificatesresolvers.cloudflare.acme.storage=/etc/traefik/acme/acme.json"
-      - "--certificatesresolvers.cloudflare.acme.dnschallenge.provider=cloudflare"
-      - "--certificatesresolvers.cloudflare.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53"
-      - "--certificatesresolvers.cloudflare.acme.dnschallenge.delaybeforecheck=10"
-      - "--log.level=DEBUG"
+    # Command flags removed in favor of traefik.yml
     environment:
       - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
       - ACME_EMAIL=${ACME_EMAIL}
