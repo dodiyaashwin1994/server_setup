@@ -71,5 +71,8 @@ ufw allow 443/tcp || true
 ufw allow 3306/tcp || true
 ufw allow 6379/tcp || true
 ufw allow 5672/tcp || true
+ufw allow 15672/tcp || true
+
+ufw allow 5672/tcp || true
 
 echo "Server bootstrap complete."
