@@ -19,8 +19,6 @@ services:
       - ./traefik/acme:/etc/traefik/acme
     # Command flags removed in favor of traefik.yml
     environment:
-      - CLOUDFLARE_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
-      - CLOUDFLARE_ZONE_API_TOKEN=${CF_ZONE_API_TOKEN}
       - ACME_EMAIL=${ACME_EMAIL}
       - SERVICE_DOMAIN=${SERVICE_DOMAIN}
       - TRAEFIK_DASHBOARD_AUTH=${TRAEFIK_DASHBOARD_AUTH}
@@ -80,7 +78,7 @@ services:
       - "traefik.http.routers.rabbitmq.rule=Host(`${RABBITMQ_MANAGEMENT_HOST}`)"
       - "traefik.http.routers.rabbitmq.entrypoints=websecure"
       - "traefik.http.routers.rabbitmq.tls=true"
-      - "traefik.http.routers.rabbitmq.tls.certresolver=cloudflare"
+      - "traefik.http.routers.rabbitmq.tls.certresolver=letsencrypt"
       - "traefik.http.services.rabbitmq.loadbalancer.server.port=15672"
 
   redis:

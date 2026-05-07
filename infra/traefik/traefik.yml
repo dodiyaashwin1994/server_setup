@@ -14,11 +14,7 @@ entryPoints:
     address: ":443"
     http:
       tls:
-        certResolver: cloudflare
-        domains:
-          - main: "${SERVICE_DOMAIN}"
-            sans:
-              - "*.${SERVICE_DOMAIN}"
+        certResolver: letsencrypt
 
 providers:
   docker:
@@ -30,13 +26,9 @@ providers:
     watch: true
 
 certificatesResolvers:
-  cloudflare:
+  letsencrypt:
     acme:
       email: "${ACME_EMAIL}"
       storage: /etc/traefik/acme/acme.json
-      dnsChallenge:
-        provider: cloudflare
-        delayBeforeCheck: 10
-        resolvers:
-          - "1.1.1.1:53"
-          - "8.8.8.8:53"
+      httpChallenge:
+        entryPoint: web
