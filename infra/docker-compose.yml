@@ -47,8 +47,6 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-authorization}
-      MYSQL_USER: ${MYSQL_APP_USER}
-      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD}
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
@@ -101,7 +99,7 @@ services:
       - --maxmemory-policy
       - ${REDIS_MAXMEMORY_POLICY:-allkeys-lru}
     ports:
-      - "${REDIS_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
+      - "0.0.0.0:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     networks:

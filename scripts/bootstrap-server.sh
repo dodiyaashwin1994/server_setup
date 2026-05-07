@@ -68,5 +68,7 @@ fi
 ufw allow OpenSSH || true
 ufw allow 80/tcp || true
 ufw allow 443/tcp || true
+ufw allow 3306/tcp || true
+ufw allow 6379/tcp || true
 
 echo "Server bootstrap complete."

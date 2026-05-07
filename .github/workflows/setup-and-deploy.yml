@@ -60,10 +60,10 @@ on:
         description: RabbitMQ User Password
         required: false
         type: string
-      mysql_app_user:
-        description: MySQL App Username
+      acme_email:
+        description: Email for Let's Encrypt (Certbot)
         required: true
-        default: saas
+        default: admin@autoleze.com
         type: string
       rabbitmq_username:
         description: RabbitMQ Username
@@ -92,8 +92,6 @@ jobs:
       ACME_EMAIL: ${{ github.event.inputs.acme_email || vars.ACME_EMAIL || 'admin@example.com' }}
       CF_DNS_API_TOKEN: ${{ secrets.CF_DNS_API_TOKEN }}
       CF_ZONE_API_TOKEN: ${{ secrets.CF_ZONE_API_TOKEN }}
-      MYSQL_APP_USER: ${{ github.event.inputs.mysql_app_user || secrets.MYSQL_APP_USER || 'saas' }}
-      MYSQL_APP_PASSWORD: ${{ secrets.MYSQL_APP_PASSWORD }}
       MYSQL_DATABASE: ${{ vars.MYSQL_DATABASE || 'authorization' }}
       MYSQL_BIND_ADDRESS: ${{ vars.MYSQL_BIND_ADDRESS || '127.0.0.1' }}
       MYSQL_PORT: ${{ vars.MYSQL_PORT || '3306' }}
@@ -150,7 +148,7 @@ jobs:
 
           keys = [
               "ACME_EMAIL", "CF_DNS_API_TOKEN", "CF_ZONE_API_TOKEN",
-              "MYSQL_ROOT_PASSWORD", "MYSQL_APP_USER", "MYSQL_APP_PASSWORD",
+              "MYSQL_ROOT_PASSWORD",
               "MYSQL_DATABASE", "MYSQL_BIND_ADDRESS", "MYSQL_PORT",
               "RABBITMQ_USERNAME", "RABBITMQ_PASSWORD", "RABBITMQ_ERLANG_COOKIE",
               "RABBITMQ_DEFAULT_VHOST", "RABBITMQ_AMQP_BIND",
@@ -158,18 +156,9 @@ jobs:
               "REDIS_MAXMEMORY", "REDIS_MAXMEMORY_POLICY",
               "SERVICE_DOMAIN", "DOCKER_API_VERSION",
           ]
-          defaults = {
-              "ACME_EMAIL": "admin@autoleaze.com",
-              "MYSQL_ROOT_PASSWORD": "root_password",
-              "MYSQL_APP_PASSWORD": "app_password",
-              "RABBITMQ_PASSWORD": "saas_password",
-              "REDIS_PASSWORD": "redis_password",
-              "SERVICE_DOMAIN": "autoleaze.com",
-              "DOCKER_API_VERSION": "1.40",
-          }
           with Path("rendered-infra/.env").open("w") as fh:
               for key in keys:
-                  value = os.environ.get(key) or defaults.get(key, "")
+                  value = os.environ.get(key) or ""
                   # Escape $ with $$$$ to survive double interpolation in Docker Compose
                   value = value.replace('$', '$$$$')
                   fh.write(f"{key}={value}\n")
@@ -177,7 +166,7 @@ jobs:
           definitions = Path("rendered-infra/rabbitmq/definitions.json")
           content = definitions.read_text()
           user = os.environ.get("RABBITMQ_USERNAME") or "saas"
-          pw = os.environ.get("RABBITMQ_PASSWORD") or defaults.get("RABBITMQ_PASSWORD")
+          pw = os.environ.get("RABBITMQ_PASSWORD") or ""
           content = content.replace("${RABBITMQ_USERNAME}", user)
           content = content.replace("${RABBITMQ_PASSWORD}", pw)
           definitions.write_text(content)
