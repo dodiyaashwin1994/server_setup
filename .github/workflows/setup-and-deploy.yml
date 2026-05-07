@@ -3,15 +3,6 @@ name: Setup And Deploy Infra
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: GitHub environment to use
-        required: true
-        type: choice
-        options:
-          - dev
-          - qa
-          - uat
-          - main
       server_host:
         description: Server Hostname or IP Address
         required: false
@@ -56,7 +47,7 @@ on:
 jobs:
   setup-and-deploy:
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || 'main' }}
+    environment: ${{ github.ref_name }}
     env:
       HOST: ${{ github.event.inputs.server_host || secrets.SERVER_HOST }}
       USER: ${{ secrets.SERVER_USER }}
