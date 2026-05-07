@@ -16,10 +16,6 @@ on:
         description: Deployment root directory
         required: true
         type: string
-      install_docker:
-        description: Install Docker and Docker Compose plugin
-        required: true
-        type: boolean
       deploy_infra:
         description: Deploy Infrastructure
         required: true
@@ -30,10 +26,6 @@ on:
         type: boolean
       setup_rabbitmq:
         description: Bootstrap and Deploy RabbitMQ
-        required: true
-        type: boolean
-      setup_redis:
-        description: Bootstrap and Deploy Redis
         required: true
         type: boolean
       server_host:
@@ -103,9 +95,23 @@ jobs:
         run: |
           bash scripts/configure-ssh-key.sh
 
+      - name: Validate Service Credentials
+        run: |
+          if [ "${{ github.event.inputs.setup_mysql }}" = "true" ] && [ -z "${{ github.event.inputs.mysql_root_password }}" ]; then
+            echo "::error::MySQL is enabled but mysql_root_password is missing." && exit 1
+          fi
+          if [ "${{ github.event.inputs.setup_rabbitmq }}" = "true" ]; then
+            if [ -z "${{ github.event.inputs.rabbitmq_username }}" ] || [ -z "${{ github.event.inputs.rabbitmq_password }}" ]; then
+              echo "::error::RabbitMQ is enabled but username or password is missing." && exit 1
+            fi
+          fi
+          if [ "${{ github.event.inputs.setup_redis }}" = "true" ] && [ -z "${{ github.event.inputs.redis_password }}" ]; then
+            echo "::error::Redis is enabled but redis_password is missing." && exit 1
+          fi
+
       - name: Prepare server
         env:
-          INSTALL_DOCKER: ${{ github.event.inputs.install_docker || 'true' }}
+          INSTALL_DOCKER: 'true'
         run: |
           chmod +x scripts/bootstrap-server.sh
           ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "mkdir -p /tmp/saas-server-setup"
@@ -118,7 +124,7 @@ jobs:
               SETUP_NGINX=true \
               SETUP_MYSQL='${{ github.event.inputs.setup_mysql || 'true' }}' \
               SETUP_RABBITMQ='${{ github.event.inputs.setup_rabbitmq || 'true' }}' \
-              SETUP_REDIS='${{ github.event.inputs.setup_redis || 'true' }}' \
+              SETUP_REDIS=true \
               SETUP_SERVICES=true \
               bash /tmp/saas-server-setup/bootstrap-server.sh
           "
@@ -170,7 +176,6 @@ jobs:
             PROFILES=''
             [ '${{ github.event.inputs.setup_mysql || 'true' }}' = 'true' ] && PROFILES=\"$PROFILES --profile mysql\"
             [ '${{ github.event.inputs.setup_rabbitmq || 'true' }}' = 'true' ] && PROFILES=\"$PROFILES --profile rabbitmq\"
-            [ '${{ github.event.inputs.setup_redis || 'true' }}' = 'true' ] && PROFILES=\"$PROFILES --profile redis\"
             
             docker compose $PROFILES up -d --remove-orphans --force-recreate
             docker compose $PROFILES ps
