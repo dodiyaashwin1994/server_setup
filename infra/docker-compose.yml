@@ -22,6 +22,7 @@ services:
       - ACME_EMAIL=${ACME_EMAIL}
       - SERVICE_DOMAIN=${SERVICE_DOMAIN}
       - TRAEFIK_DASHBOARD_AUTH=${TRAEFIK_DASHBOARD_AUTH}
+      - DOCKER_API_VERSION=${DOCKER_API_VERSION:-1.40}
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.api.rule=Host(`traefik.${SERVICE_DOMAIN}`)"

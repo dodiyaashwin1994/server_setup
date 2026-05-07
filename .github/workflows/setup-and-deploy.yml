@@ -84,6 +84,7 @@ jobs:
       SERVICE_DOMAIN: ${{ github.event.inputs.service_domain || vars.SERVICE_DOMAIN || 'autoleaze.com' }}
       MYSQL_ROOT_PASSWORD: ${{ github.event.inputs.mysql_root_password || secrets.MYSQL_ROOT_PASSWORD }}
       RABBITMQ_PASSWORD: ${{ github.event.inputs.rabbitmq_password || secrets.RABBITMQ_PASSWORD }}
+      DOCKER_API_VERSION: '1.40'
       ACME_EMAIL: ${{ github.event.inputs.acme_email || vars.ACME_EMAIL || github.event.pusher.email || github.actor_id && format('{0}@users.noreply.github.com', github.actor) || 'admin@autoleaze.com' }}
       TRAEFIK_USER: ${{ github.event.inputs.traefik_user }}
       TRAEFIK_PASSWORD: ${{ github.event.inputs.traefik_password }}
