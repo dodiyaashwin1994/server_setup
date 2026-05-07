@@ -27,10 +27,23 @@ on:
         default: true
         type: boolean
       deploy_infra:
-        description: Deploy Traefik, MySQL, RabbitMQ, Redis, and Nginx
+        description: Deploy Nginx, MySQL, RabbitMQ, and Redis
         required: true
         default: true
         type: boolean
+      service_domain:
+        description: Base domain for Wildcard SSL (e.g. example.com)
+        required: true
+        default: autoleaze.com
+        type: string
+      mysql_root_password:
+        description: MySQL Root Password
+        required: false
+        type: string
+      rabbitmq_password:
+        description: RabbitMQ User Password
+        required: false
+        type: string
 
 jobs:
   setup-and-deploy:
@@ -47,6 +60,7 @@ jobs:
       TRAEFIK_DNS_PROVIDER: ${{ vars.TRAEFIK_DNS_PROVIDER || 'cloudflare' }}
       TRAEFIK_DNS_DELAY_BEFORE_CHECK: ${{ vars.TRAEFIK_DNS_DELAY_BEFORE_CHECK || '10' }}
       CF_DNS_API_TOKEN: ${{ secrets.CF_DNS_API_TOKEN }}
+      CF_ZONE_API_TOKEN: ${{ secrets.CF_ZONE_API_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ vars.AWS_REGION }}
@@ -69,8 +83,9 @@ jobs:
       REDIS_PORT: ${{ vars.REDIS_PORT || '6379' }}
       REDIS_MAXMEMORY: ${{ vars.REDIS_MAXMEMORY || '512mb' }}
       REDIS_MAXMEMORY_POLICY: ${{ vars.REDIS_MAXMEMORY_POLICY || 'allkeys-lru' }}
-      SERVICE_DOMAIN: ${{ vars.SERVICE_DOMAIN || 'autoleaze.com' }}
-      FRONTEND_DOMAINS: ${{ vars.FRONTEND_DOMAINS || 'autoleaze.com' }}
+      SERVICE_DOMAIN: ${{ github.event.inputs.service_domain || vars.SERVICE_DOMAIN || 'autoleaze.com' }}
+      MYSQL_ROOT_PASSWORD: ${{ github.event.inputs.mysql_root_password || secrets.MYSQL_ROOT_PASSWORD }}
+      RABBITMQ_PASSWORD: ${{ github.event.inputs.rabbitmq_password || secrets.RABBITMQ_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
@@ -95,7 +110,6 @@ jobs:
             sudo DEPLOY_ROOT='$DEPLOY_ROOT' \
               INSTALL_DOCKER='$INSTALL_DOCKER' \
               SETUP_NGINX=true \
-              SETUP_TRAEFIK=true \
               SETUP_MYSQL=true \
               SETUP_RABBITMQ=true \
               SETUP_REDIS=true \
@@ -114,7 +128,7 @@ jobs:
           keys = [
               "ACME_EMAIL", "TRAEFIK_DASHBOARD_HOST", "TRAEFIK_DASHBOARD_AUTH",
               "TRAEFIK_DNS_PROVIDER", "TRAEFIK_DNS_DELAY_BEFORE_CHECK",
-              "CF_DNS_API_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+              "CF_DNS_API_TOKEN", "CF_ZONE_API_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
               "AWS_REGION", "GODADDY_API_KEY", "GODADDY_API_SECRET",
               "MYSQL_ROOT_PASSWORD", "MYSQL_APP_USER", "MYSQL_APP_PASSWORD",
               "MYSQL_DATABASE", "MYSQL_BIND_ADDRESS", "MYSQL_PORT",
