@@ -203,7 +203,7 @@ jobs:
 
       - name: Deploy infra
         run: |
-          ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "mkdir -p '$DEPLOY_ROOT/infra'"
+          ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "rm -rf '$DEPLOY_ROOT/infra' && mkdir -p '$DEPLOY_ROOT/infra'"
           echo "DEBUG: Content of local docker-compose.yml (first 10 lines):"
           head -n 10 rendered-infra/docker-compose.yml
           
@@ -223,7 +223,8 @@ jobs:
             if [ "${{ github.event.inputs.setup_rabbitmq || 'true' }}" = "true" ]; then PROFILES="\$PROFILES --profile rabbitmq"; fi
             if [ "${{ github.event.inputs.setup_redis || 'true' }}" = "true" ]; then PROFILES="\$PROFILES --profile redis"; fi
             
-            echo "Deploying with profiles: \$PROFILES"
+            echo "Deploying with profiles: \$PROFILES (forcing pull)"
+            docker compose \$PROFILES pull
             docker compose \$PROFILES up -d --remove-orphans --force-recreate
             docker compose \$PROFILES ps
           EOF
