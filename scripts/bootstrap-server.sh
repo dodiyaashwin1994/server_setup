@@ -39,6 +39,7 @@ mkdir -p "$DEPLOY_ROOT"
 
 if [ "$SETUP_NGINX" = "true" ]; then
   mkdir -p "${DEPLOY_ROOT}/infra/nginx/conf.d"
+  mkdir -p "${DEPLOY_ROOT}/infra/nginx/locations"
   mkdir -p "${DEPLOY_ROOT}/infra/nginx/certs"
   mkdir -p "${DEPLOY_ROOT}/infra/nginx/html"
   mkdir -p "${DEPLOY_ROOT}/infra/nginx/logs"
