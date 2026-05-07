@@ -29,7 +29,13 @@ services:
     environment:
       - CLOUDFLARE_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
       - CLOUDFLARE_ZONE_API_TOKEN=${CF_ZONE_API_TOKEN}
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot certonly --dns-cloudflare --dns-cloudflare-credentials /dev/null --dns-cloudflare-propagation-seconds 60 --email ${ACME_EMAIL} --agree-tos --no-eff-email --keep-until-expiring -d \"${SERVICE_DOMAIN}\" -d \"*.${SERVICE_DOMAIN}\" --non-interactive; sleep 12h & wait $${!}; done;'"
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do \
+      DOMAINS_ARGS=\"\"; \
+      for dom in $(echo ${SERVICE_DOMAIN} | tr \",\" \" \"); do \
+        DOMAINS_ARGS=\"$DOMAINS_ARGS -d $dom -d *.$dom\"; \
+      done; \
+      certbot certonly --dns-cloudflare --dns-cloudflare-credentials /dev/null --dns-cloudflare-propagation-seconds 60 --email ${ACME_EMAIL} --agree-tos --no-eff-email --keep-until-expiring $DOMAINS_ARGS --non-interactive; \
+      sleep 12h & wait $${!}; done;'"
     networks:
       - public
 

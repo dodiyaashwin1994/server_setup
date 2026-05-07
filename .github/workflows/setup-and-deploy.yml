@@ -48,7 +48,7 @@ on:
         required: false
         type: string
       service_domain:
-        description: Base domain for Wildcard SSL (e.g. example.com)
+        description: Comma-separated base domains for Wildcard SSL (e.g. example.com, example.net)
         required: true
         default: autoleaze.com
         type: string
