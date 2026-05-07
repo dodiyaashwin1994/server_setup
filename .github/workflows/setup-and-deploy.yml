@@ -12,45 +12,41 @@ on:
           - qa
           - uat
           - main
-      deploy_root:
-        description: Deployment root directory
-        required: true
-        type: string
-      deploy_infra:
-        description: Deploy Infrastructure
-        required: true
-        type: boolean
-      setup_mysql:
-        description: Bootstrap and Deploy MySQL
-        required: true
-        type: boolean
-      setup_rabbitmq:
-        description: Bootstrap and Deploy RabbitMQ
-        required: true
-        type: boolean
       server_host:
         description: Server Hostname or IP Address
         required: false
+        type: string
+      deploy_root:
+        description: Deployment root directory
+        required: true
         type: string
       service_domain:
         description: Comma-separated base domains for Wildcard SSL (e.g. example.com, example.net)
         required: true
         type: string
-      mysql_root_password:
-        description: MySQL Root Password
-        required: false
-        type: string
-      rabbitmq_password:
-        description: RabbitMQ User Password
-        required: false
-        type: string
       acme_email:
         description: Email for Let's Encrypt (Certbot)
         required: true
         type: string
+      setup_mysql:
+        description: Bootstrap and Deploy MySQL
+        required: true
+        type: boolean
+      mysql_root_password:
+        description: MySQL Root Password
+        required: false
+        type: string
+      setup_rabbitmq:
+        description: Bootstrap and Deploy RabbitMQ
+        required: true
+        type: boolean
       rabbitmq_username:
         description: RabbitMQ Username
         required: true
+        type: string
+      rabbitmq_password:
+        description: RabbitMQ User Password
+        required: false
         type: string
       redis_password:
         description: Redis Password
@@ -130,7 +126,6 @@ jobs:
           "
 
       - name: Render infra environment
-        if: ${{ github.event.inputs.deploy_infra || true }}
         run: |
           cp -R infra rendered-infra
           python3 - <<'PY'
@@ -164,7 +159,6 @@ jobs:
           PY
 
       - name: Deploy infra
-        if: ${{ github.event.inputs.deploy_infra || true }}
         run: |
           ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "mkdir -p '$DEPLOY_ROOT/infra'"
           rsync -az --delete -e "ssh -i ~/.ssh/bootstrap_key -p $PORT -o StrictHostKeyChecking=no" \
