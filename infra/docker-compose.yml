@@ -1,43 +1,35 @@
 name: saas-infra
 
 services:
-  nginx:
-    image: nginx:1.27-alpine
-    container_name: nginx
+  traefik:
+    image: traefik:v3.1
+    container_name: traefik
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - public
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - ./nginx/locations:/etc/nginx/conf.d/locations:ro
-      - ./nginx/certs:/etc/nginx/certs:ro
-      - ./nginx/html:/usr/share/nginx/html:ro
-      - ./nginx/logs:/var/log/nginx
-      - ./certbot/conf:/etc/letsencrypt:ro
-      - ./certbot/www:/var/www/certbot:ro
-    networks:
-      - public
-
-  certbot:
-    image: certbot/dns-cloudflare:latest
-    container_name: certbot
-    volumes:
-      - ./certbot/conf:/etc/letsencrypt
-      - ./certbot/www:/var/www/certbot
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - ./traefik/acme:/etc/traefik/acme
     environment:
-      - CLOUDFLARE_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
-      - CLOUDFLARE_ZONE_API_TOKEN=${CF_ZONE_API_TOKEN}
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do \
-      DOMAINS_ARGS=\"\"; \
-      for dom in $(echo ${SERVICE_DOMAIN} | tr \",\" \" \"); do \
-        DOMAINS_ARGS=\"$$DOMAINS_ARGS -d $$dom -d *.$$dom\"; \
-      done; \
-      certbot certonly --dns-cloudflare --dns-cloudflare-credentials /dev/null --dns-cloudflare-propagation-seconds 60 --email ${ACME_EMAIL} --agree-tos --no-eff-email --keep-until-expiring $$DOMAINS_ARGS --non-interactive; \
-      sleep 12h & wait $${!}; done;'"
-    networks:
-      - public
+      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+      - ACME_EMAIL=${ACME_EMAIL}
+      - SERVICE_DOMAIN=${SERVICE_DOMAIN}
+      - TRAEFIK_DASHBOARD_AUTH=${TRAEFIK_DASHBOARD_AUTH}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`traefik.${SERVICE_DOMAIN}`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls=true"
+      - "traefik.http.routers.api.service=api@internal"
+      - "traefik.http.routers.api.middlewares=auth"
+      - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_DASHBOARD_AUTH}"
 
   mysql:
     profiles: ["mysql"]
@@ -71,9 +63,6 @@ services:
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
       RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_DEFAULT_VHOST:-Account}
       RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE}
-      RABBITMQ_LOAD_DEFINITIONS: /etc/rabbitmq/definitions.json
-    ports:
-      - "${RABBITMQ_AMQP_BIND:-127.0.0.1:5672}:5672"
     volumes:
       - rabbitmq_db_data:/var/lib/rabbitmq
       - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
@@ -82,6 +71,13 @@ services:
       public:
         aliases:
           - rabbitmq
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.rabbitmq.rule=Host(`rabbitmq.${SERVICE_DOMAIN}`)"
+      - "traefik.http.routers.rabbitmq.entrypoints=websecure"
+      - "traefik.http.routers.rabbitmq.tls=true"
+      - "traefik.http.routers.rabbitmq.tls.certresolver=cloudflare"
+      - "traefik.http.services.rabbitmq.loadbalancer.server.port=15672"
 
   redis:
     image: redis:7.4-alpine
@@ -91,12 +87,6 @@ services:
       - redis-server
       - --requirepass
       - ${REDIS_PASSWORD}
-      - --appendonly
-      - "yes"
-      - --maxmemory
-      - ${REDIS_MAXMEMORY:-512mb}
-      - --maxmemory-policy
-      - ${REDIS_MAXMEMORY_POLICY:-allkeys-lru}
     ports:
       - "0.0.0.0:${REDIS_PORT:-6379}:6379"
     volumes:

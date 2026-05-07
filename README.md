@@ -1,16 +1,16 @@
-# 🚀 SaaS Infrastructure Foundation
+# 🚀 SaaS Infrastructure Foundation (Traefik Edition)
 
-A centralized, containerized infrastructure for multi-tenant SaaS deployment, featuring **Master Nginx**, automated **Wildcard SSL**, and managed service stacks.
+A centralized, containerized infrastructure for multi-tenant SaaS deployment, featuring **Traefik v3.1**, automated **Wildcard SSL**, and managed service stacks.
 
 ## 🏗️ Architecture Overview
 
-- **Reverse Proxy**: Master Nginx container acting as the primary ingress.
-- **SSL Management**: Certbot using Cloudflare DNS-01 challenge for automatic **Wildcard SSL** (`*.yourdomain.com`).
+- **Reverse Proxy**: **Traefik** acting as the primary ingress with automatic service discovery.
+- **SSL Management**: Native Traefik ACME with Cloudflare DNS-01 challenge for **Wildcard SSL** (`*.yourdomain.com`).
 - **Core Services**: 
-  - **Redis**: Mandatory caching layer.
-  - **MySQL**: Optional root-managed database.
-  - **RabbitMQ**: Optional message broker with pre-seeded definitions.
-- **Routing Model**: Decentralized. Each service deploys a `.inc` snippet to `/etc/nginx/conf.d/locations/` to manage its own paths.
+  - **Redis**: Mandatory caching layer (isolated by DB index per service).
+  - **MySQL**: Master database container.
+  - **RabbitMQ**: Shared message broker with management UI.
+- **Routing Model**: Label-based. Each service "announces" its subdomain and port via Docker labels.
 
 ---
 
@@ -18,49 +18,47 @@ A centralized, containerized infrastructure for multi-tenant SaaS deployment, fe
 
 ### 1. Prerequisites
 - A fresh Ubuntu server.
-- **Cloudflare DNS**: API Token and Zone ID for SSL challenges.
+- **Cloudflare DNS**: API Token with DNS Edit permissions.
 - **GitHub Secrets**:
   - `SERVER_HOST`: Your server IP.
   - `SERVER_USER`: Deployment user (e.g., `root`).
   - `BOOTSTRAP_SSH_PRIVATE_KEY_BASE64`: Your server's SSH private key.
-  - `CF_DNS_API_TOKEN` & `CF_ZONE_API_TOKEN`: Cloudflare credentials.
+  - `CF_DNS_API_TOKEN`: Cloudflare credential.
+  - `TRAEFIK_DASHBOARD_AUTH`: Hashed credentials for the dashboard (`user:hashedpass`).
 
-### 2. Manual Deployment
-Trigger the **"Setup And Deploy Infra"** workflow from the Actions tab. You will be prompted for:
-- **Service Domains**: Comma-separated list of domains for Wildcard SSL.
-*   **ACME Email**: For Let's Encrypt registration.
-*   **Passwords**: Root passwords for MySQL, RabbitMQ, and Redis.
-*   **Toggles**: Choose whether to bootstrap MySQL and RabbitMQ.
+### 2. Deployment
+Trigger the **"Setup And Deploy Infra"** workflow from the Actions tab. It will:
+1. Bootstrap the server (Docker, Networks, UFW).
+2. Start the Traefik Hub.
+3. Provision MySQL, Redis, and RabbitMQ.
 
 ---
 
 ## 📂 Service Integration
 
-To add a new service to the infrastructure:
-1. Create a location snippet (e.g., `myservice.inc`).
-2. Define your proxy logic:
-   ```nginx
-   location /api/ {
-       proxy_pass http://myservice:8000;
-       include /etc/nginx/conf.d/proxy_params;
-   }
-   ```
-3. Deploy the snippet to `infra/nginx/locations/` on the server and reload Nginx.
+To add a new service to the infrastructure, simply add these labels to your service's `docker-compose.yml`:
+
+```yaml
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.${SERVICE_NAME}.rule=Host(`${SERVICE_NAME}.${SERVICE_DOMAIN}`)"
+  - "traefik.http.routers.${SERVICE_NAME}.entrypoints=websecure"
+  - "traefik.http.routers.${SERVICE_NAME}.tls=true"
+  - "traefik.http.routers.${SERVICE_NAME}.tls.certresolver=cloudflare"
+  - "traefik.http.services.${SERVICE_NAME}.loadbalancer.server.port=8000"
+```
 
 ---
 
-## 🔐 Database Management
+## 📊 Management Dashboards
 
-MySQL and Redis are exposed on all interfaces (`0.0.0.0`) by default to allow management from your local host:
+- **Traefik Dashboard**: `https://traefik.autoleaze.com`
+- **RabbitMQ Management**: `https://rabbitmq.autoleaze.com`
+
+---
+
+## 🔐 Database Access
+
+MySQL and Redis are exposed for management from your local host:
 - **MySQL Port**: `3306`
 - **Redis Port**: `6379`
-
-*Note: It is strongly recommended to restrict access to these ports using the server's firewall (UFW) or Cloudflare IP whitelisting for production environments.*
-
----
-
-## 📜 Deployment Workflow Logic
-
-- **Environment**: Automatically determined by the **branch name** (e.g., `main`, `dev`, `uat`).
-- **SSL Paths**: Certbot names the certificate directory after the **first** domain in your `SERVICE_DOMAIN` list.
-- **Validation**: The workflow automatically validates that you've provided passwords for any service marked for installation.
