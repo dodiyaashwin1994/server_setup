@@ -192,6 +192,7 @@ jobs:
             PROFILES=''
             [ '${{ github.event.inputs.setup_mysql || 'true' }}' = 'true' ] && PROFILES=\"$PROFILES --profile mysql\"
             [ '${{ github.event.inputs.setup_rabbitmq || 'true' }}' = 'true' ] && PROFILES=\"$PROFILES --profile rabbitmq\"
+            [ '${{ github.event.inputs.setup_redis || 'true' }}' = 'true' ] && PROFILES=\"$PROFILES --profile redis\"
             
             docker compose $PROFILES up -d --remove-orphans --force-recreate
             docker compose $PROFILES ps

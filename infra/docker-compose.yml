@@ -23,11 +23,6 @@ services:
       - SERVICE_DOMAIN=${SERVICE_DOMAIN}
       - TRAEFIK_DASHBOARD_AUTH=${TRAEFIK_DASHBOARD_AUTH}
       - DOCKER_API_VERSION=${DOCKER_API_VERSION:-1.40}
-      - TRAEFIK_PROVIDERS_DOCKER=true
-      - TRAEFIK_PROVIDERS_DOCKER_ENDPOINT=unix:///var/run/docker.sock
-      - TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT=false
-      - TRAEFIK_PROVIDERS_DOCKER_NETWORK=public
-      - TRAEFIK_PROVIDERS_DOCKER_APIVERSION=1.40
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.api.rule=Host(`traefik.${SERVICE_DOMAIN}`)"
@@ -86,6 +81,7 @@ services:
       - "traefik.http.services.rabbitmq.loadbalancer.server.port=15672"
 
   redis:
+    profiles: ["redis"]
     image: redis:7.4-alpine
     container_name: redis
     restart: unless-stopped
