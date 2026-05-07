@@ -19,17 +19,21 @@ on:
         description: Email for Traefik ACME (defaults to GitHub email if empty)
         required: false
         type: string
-      setup_redis:
-        description: Deploy Redis
-        required: true
-        default: true
-        type: boolean
       traefik_user:
         description: Traefik Dashboard Username (optional)
         required: false
         type: string
       traefik_password:
         description: Traefik Dashboard Password (optional)
+        required: false
+        type: string
+      setup_redis:
+        description: Deploy Redis
+        required: true
+        default: true
+        type: boolean
+      redis_password:
+        description: Redis Password
         required: false
         type: string
       setup_mysql:
@@ -52,10 +56,7 @@ on:
         description: RabbitMQ User Password
         required: false
         type: string
-      redis_password:
-        description: Redis Password
-        required: false
-        type: string
+      
 
 jobs:
   setup-and-deploy:
@@ -66,7 +67,6 @@ jobs:
       USER: ${{ secrets.SERVER_USER }}
       PORT: ${{ secrets.SERVER_PORT || '22' }}
       DEPLOY_ROOT: ${{ github.event.inputs.deploy_root || '/opt/saas' }}
-      ACME_EMAIL: ${{ github.event.inputs.acme_email || vars.ACME_EMAIL || 'admin@example.com' }}
       CF_DNS_API_TOKEN: ${{ secrets.CF_DNS_API_TOKEN }}
       CF_ZONE_API_TOKEN: ${{ secrets.CF_ZONE_API_TOKEN }}
       MYSQL_DATABASE: ${{ vars.MYSQL_DATABASE || 'authorization' }}
