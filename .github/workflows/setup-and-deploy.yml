@@ -27,6 +27,10 @@ on:
         description: Traefik Dashboard Password (optional)
         required: false
         type: string
+      traefik_dashboard_host:
+        description: Traefik Dashboard Hostname (e.g. traefik.example.com)
+        required: false
+        type: string
       setup_redis:
         description: Deploy Redis
         required: true
@@ -36,12 +40,20 @@ on:
         description: Redis Password
         required: false
         type: string
+      redis_bind_address:
+        description: Redis Bind Address (default 0.0.0.0)
+        required: false
+        type: string
       setup_mysql:
         description: Bootstrap and Deploy MySQL
         required: true
         type: boolean
       mysql_root_password:
         description: MySQL Root Password
+        required: false
+        type: string
+      mysql_bind_address:
+        description: MySQL Bind Address (default 0.0.0.0)
         required: false
         type: string
       setup_rabbitmq:
@@ -54,6 +66,10 @@ on:
         type: string
       rabbitmq_password:
         description: RabbitMQ User Password
+        required: false
+        type: string
+      rabbitmq_management_host:
+        description: RabbitMQ Management Hostname (e.g. rabbitmq.example.com)
         required: false
         type: string
       
@@ -70,14 +86,15 @@ jobs:
       CF_DNS_API_TOKEN: ${{ secrets.CF_DNS_API_TOKEN }}
       CF_ZONE_API_TOKEN: ${{ secrets.CF_ZONE_API_TOKEN }}
       MYSQL_DATABASE: ${{ vars.MYSQL_DATABASE || 'authorization' }}
-      MYSQL_BIND_ADDRESS: ${{ vars.MYSQL_BIND_ADDRESS || '0.0.0.0' }}
+      MYSQL_BIND_ADDRESS: ${{ github.event.inputs.mysql_bind_address || vars.MYSQL_BIND_ADDRESS || '0.0.0.0' }}
       MYSQL_PORT: ${{ vars.MYSQL_PORT || '3306' }}
       RABBITMQ_USERNAME: ${{ github.event.inputs.rabbitmq_username || secrets.RABBITMQ_USERNAME || 'saas' }}
       RABBITMQ_ERLANG_COOKIE: ${{ secrets.RABBITMQ_ERLANG_COOKIE }}
       RABBITMQ_DEFAULT_VHOST: ${{ vars.RABBITMQ_DEFAULT_VHOST || 'Account' }}
-      RABBITMQ_AMQP_BIND: ${{ vars.RABBITMQ_AMQP_BIND || '127.0.0.1:5672' }}
+      RABBITMQ_AMQP_BIND: ${{ vars.RABBITMQ_AMQP_BIND || '0.0.0.0:5672' }}
+      RABBITMQ_MANAGEMENT_HOST: ${{ github.event.inputs.rabbitmq_management_host || secrets.RABBITMQ_MANAGEMENT_HOST || format('rabbitmq.{0}', github.event.inputs.service_domain || vars.SERVICE_DOMAIN || 'autoleaze.com') }}
       REDIS_PASSWORD: ${{ github.event.inputs.redis_password || secrets.REDIS_PASSWORD }}
-      REDIS_BIND_ADDRESS: ${{ vars.REDIS_BIND_ADDRESS || '0.0.0.0' }}
+      REDIS_BIND_ADDRESS: ${{ github.event.inputs.redis_bind_address || vars.REDIS_BIND_ADDRESS || '0.0.0.0' }}
       REDIS_PORT: ${{ vars.REDIS_PORT || '6379' }}
       REDIS_MAXMEMORY: ${{ vars.REDIS_MAXMEMORY || '512mb' }}
       REDIS_MAXMEMORY_POLICY: ${{ vars.REDIS_MAXMEMORY_POLICY || 'allkeys-lru' }}
@@ -89,6 +106,7 @@ jobs:
       ACME_EMAIL: ${{ github.event.inputs.acme_email || vars.ACME_EMAIL || github.event.pusher.email || github.actor_id && format('{0}@users.noreply.github.com', github.actor) || 'admin@autoleaze.com' }}
       TRAEFIK_USER: ${{ github.event.inputs.traefik_user }}
       TRAEFIK_PASSWORD: ${{ github.event.inputs.traefik_password }}
+      TRAEFIK_DASHBOARD_HOST: ${{ github.event.inputs.traefik_dashboard_host || secrets.TRAEFIK_DASHBOARD_HOST || format('traefik.{0}', github.event.inputs.service_domain || vars.SERVICE_DOMAIN || 'autoleaze.com') }}
       TRAEFIK_DASHBOARD_AUTH: ${{ secrets.TRAEFIK_DASHBOARD_AUTH }}
 
     steps:
@@ -163,6 +181,7 @@ jobs:
               "REDIS_MAXMEMORY", "REDIS_MAXMEMORY_POLICY",
               "SERVICE_DOMAIN", "DOCKER_API_VERSION",
               "TRAEFIK_DASHBOARD_AUTH", "TRAEFIK_PROVIDERS_DOCKER_APIVERSION",
+              "TRAEFIK_DASHBOARD_HOST", "RABBITMQ_MANAGEMENT_HOST",
           ]
           with Path("rendered-infra/.env").open("w") as fh:
               for key in keys:
