@@ -1,62 +1,66 @@
-# Server Setup
+# 🚀 SaaS Infrastructure Foundation
 
-Manual GitHub Action for preparing and deploying a fresh Ubuntu server.
+A centralized, containerized infrastructure for multi-tenant SaaS deployment, featuring **Master Nginx**, automated **Wildcard SSL**, and managed service stacks.
 
-This setup action installs Docker, creates the shared `public` Docker network,
-and prepares selected deployment folders under `/opt/saas`.
+## 🏗️ Architecture Overview
 
-The `Setup And Deploy Infra` workflow can also deploy the shared infrastructure
-stack from this repo:
+- **Reverse Proxy**: Master Nginx container acting as the primary ingress.
+- **SSL Management**: Certbot using Cloudflare DNS-01 challenge for automatic **Wildcard SSL** (`*.yourdomain.com`).
+- **Core Services**: 
+  - **Redis**: Mandatory caching layer.
+  - **MySQL**: Optional root-managed database.
+  - **RabbitMQ**: Optional message broker with pre-seeded definitions.
+- **Routing Model**: Decentralized. Each service deploys a `.inc` snippet to `/etc/nginx/conf.d/locations/` to manage its own paths.
 
-- Traefik
-- MySQL
-- RabbitMQ
-- Redis
-- Nginx catch-all UI router
+---
 
-## SSH Key
+## 🛠️ Getting Started
 
-Recommended: create this secret in the `server_setup` repo:
+### 1. Prerequisites
+- A fresh Ubuntu server.
+- **Cloudflare DNS**: API Token and Zone ID for SSL challenges.
+- **GitHub Secrets**:
+  - `SERVER_HOST`: Your server IP.
+  - `SERVER_USER`: Deployment user (e.g., `root`).
+  - `BOOTSTRAP_SSH_PRIVATE_KEY_BASE64`: Your server's SSH private key.
+  - `CF_DNS_API_TOKEN` & `CF_ZONE_API_TOKEN`: Cloudflare credentials.
 
-```text
-BOOTSTRAP_SSH_PRIVATE_KEY_BASE64
-```
+### 2. Manual Deployment
+Trigger the **"Setup And Deploy Infra"** workflow from the Actions tab. You will be prompted for:
+- **Service Domains**: Comma-separated list of domains for Wildcard SSL.
+*   **ACME Email**: For Let's Encrypt registration.
+*   **Passwords**: Root passwords for MySQL, RabbitMQ, and Redis.
+*   **Toggles**: Choose whether to bootstrap MySQL and RabbitMQ.
 
-Create it from your Mac with:
+---
 
-```bash
-base64 -i /path/to/server_private_key | tr -d '\n'
-```
+## 📂 Service Integration
 
-Raw `BOOTSTRAP_SSH_PRIVATE_KEY` is still supported, and the workflow also has an
-`ssh_private_key` input, but base64 avoids newline/copy-paste corruption. The
-key must be unencrypted, must log in as the selected `user`, and that user must
-be able to run `sudo`.
+To add a new service to the infrastructure:
+1. Create a location snippet (e.g., `myservice.inc`).
+2. Define your proxy logic:
+   ```nginx
+   location /api/ {
+       proxy_pass http://myservice:8000;
+       include /etc/nginx/conf.d/proxy_params;
+   }
+   ```
+3. Deploy the snippet to `infra/nginx/locations/` on the server and reload Nginx.
 
-## Workflow Inputs
+---
 
-- `host`: target server IP/host
-- `environment`: GitHub environment, such as `dev`, `qa`, `uat`, or `main`
-- `user`: existing sudo user, usually `root` or `ubuntu`
-- `port`: SSH port, usually `22`
-- `ssh_private_key`: optional private key input; prefer secret
-- `deploy_root`: deployment root, default `/opt/saas`
-- `install_docker`: install Docker and Docker Compose plugin
-- `setup_nginx`: prepare Nginx UI deployment folder
-- `setup_traefik`: prepare Traefik deployment folder
-- `setup_mysql`: prepare MySQL deployment folder
-- `setup_rabbitmq`: prepare RabbitMQ deployment folder
-- `setup_redis`: prepare Redis deployment folder
-- `setup_services`: prepare service deployment folders
+## 🔐 Database Management
 
-The setup action prepares the server. Individual repos still deploy their own
-containers and config using the configured SSH user, for example `root`.
+MySQL and Redis are exposed on all interfaces (`0.0.0.0`) by default to allow management from your local host:
+- **MySQL Port**: `3306`
+- **Redis Port**: `6379`
 
-## Single Repo Infra Deploy
+*Note: It is strongly recommended to restrict access to these ports using the server's firewall (UFW) or Cloudflare IP whitelisting for production environments.*
 
-Use `.github/workflows/setup-and-deploy.yml` when you want one button to both
-bootstrap the server and start shared infrastructure. It expects environment
-secrets/variables for MySQL, RabbitMQ, Redis, and Traefik DNS challenge.
+---
 
-Service repositories still deploy `authorization`, `workflow`, `notification`,
-`audit`, and `document` individually.
+## 📜 Deployment Workflow Logic
+
+- **Environment**: Automatically determined by the **branch name** (e.g., `main`, `dev`, `uat`).
+- **SSL Paths**: Certbot names the certificate directory after the **first** domain in your `SERVICE_DOMAIN` list.
+- **Validation**: The workflow automatically validates that you've provided passwords for any service marked for installation.
