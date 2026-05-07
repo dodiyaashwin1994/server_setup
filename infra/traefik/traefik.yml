@@ -16,9 +16,9 @@ entryPoints:
       tls:
         certResolver: cloudflare
         domains:
-          - main: "autoleaze.com"
+          - main: "${SERVICE_DOMAIN}"
             sans:
-              - "*.autoleaze.com"
+              - "*.${SERVICE_DOMAIN}"
 
 providers:
   docker:
