@@ -6,7 +6,6 @@ on:
       environment:
         description: GitHub environment to use
         required: true
-        default: main
         type: choice
         options:
           - dev
@@ -16,32 +15,26 @@ on:
       deploy_root:
         description: Deployment root directory
         required: true
-        default: /opt/saas
         type: string
       install_docker:
         description: Install Docker and Docker Compose plugin
         required: true
-        default: true
         type: boolean
       deploy_infra:
         description: Deploy Infrastructure
         required: true
-        default: true
         type: boolean
       setup_mysql:
         description: Bootstrap and Deploy MySQL
         required: true
-        default: true
         type: boolean
       setup_rabbitmq:
         description: Bootstrap and Deploy RabbitMQ
         required: true
-        default: true
         type: boolean
       setup_redis:
         description: Bootstrap and Deploy Redis
         required: true
-        default: true
         type: boolean
       server_host:
         description: Server Hostname or IP Address
@@ -50,7 +43,6 @@ on:
       service_domain:
         description: Comma-separated base domains for Wildcard SSL (e.g. example.com, example.net)
         required: true
-        default: autoleaze.com
         type: string
       mysql_root_password:
         description: MySQL Root Password
@@ -63,21 +55,14 @@ on:
       acme_email:
         description: Email for Let's Encrypt (Certbot)
         required: true
-        default: admin@autoleze.com
         type: string
       rabbitmq_username:
         description: RabbitMQ Username
         required: true
-        default: saas
         type: string
       redis_password:
         description: Redis Password
         required: false
-        type: string
-      acme_email:
-        description: Email for Let's Encrypt (Certbot)
-        required: true
-        default: admin@autoleze.com
         type: string
 
 jobs:
