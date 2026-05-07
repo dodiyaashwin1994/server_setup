@@ -27,10 +27,29 @@ on:
         default: true
         type: boolean
       deploy_infra:
-        description: Deploy Nginx, MySQL, RabbitMQ, and Redis
+        description: Deploy Infrastructure
         required: true
         default: true
         type: boolean
+      setup_mysql:
+        description: Bootstrap and Deploy MySQL
+        required: true
+        default: true
+        type: boolean
+      setup_rabbitmq:
+        description: Bootstrap and Deploy RabbitMQ
+        required: true
+        default: true
+        type: boolean
+      setup_redis:
+        description: Bootstrap and Deploy Redis
+        required: true
+        default: true
+        type: boolean
+      server_host:
+        description: Server Hostname or IP Address
+        required: false
+        type: string
       service_domain:
         description: Base domain for Wildcard SSL (e.g. example.com)
         required: true
@@ -44,41 +63,48 @@ on:
         description: RabbitMQ User Password
         required: false
         type: string
+      mysql_app_user:
+        description: MySQL App Username
+        required: true
+        default: saas
+        type: string
+      rabbitmq_username:
+        description: RabbitMQ Username
+        required: true
+        default: saas
+        type: string
+      redis_password:
+        description: Redis Password
+        required: false
+        type: string
+      acme_email:
+        description: Email for Let's Encrypt (Certbot)
+        required: true
+        default: admin@autoleze.com
+        type: string
 
 jobs:
   setup-and-deploy:
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment || 'main' }}
     env:
-      HOST: ${{ secrets.SERVER_HOST }}
+      HOST: ${{ github.event.inputs.server_host || secrets.SERVER_HOST }}
       USER: ${{ secrets.SERVER_USER }}
       PORT: ${{ secrets.SERVER_PORT || '22' }}
       DEPLOY_ROOT: ${{ github.event.inputs.deploy_root || '/opt/saas' }}
-      ACME_EMAIL: ${{ vars.ACME_EMAIL || 'admin@example.com' }}
-      TRAEFIK_DASHBOARD_HOST: ${{ secrets.TRAEFIK_DASHBOARD_HOST }}
-      TRAEFIK_DASHBOARD_AUTH: ${{ secrets.TRAEFIK_DASHBOARD_AUTH }}
-      TRAEFIK_DNS_PROVIDER: ${{ vars.TRAEFIK_DNS_PROVIDER || 'cloudflare' }}
-      TRAEFIK_DNS_DELAY_BEFORE_CHECK: ${{ vars.TRAEFIK_DNS_DELAY_BEFORE_CHECK || '10' }}
+      ACME_EMAIL: ${{ github.event.inputs.acme_email || vars.ACME_EMAIL || 'admin@example.com' }}
       CF_DNS_API_TOKEN: ${{ secrets.CF_DNS_API_TOKEN }}
       CF_ZONE_API_TOKEN: ${{ secrets.CF_ZONE_API_TOKEN }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_REGION: ${{ vars.AWS_REGION }}
-      GODADDY_API_KEY: ${{ secrets.GODADDY_API_KEY }}
-      GODADDY_API_SECRET: ${{ secrets.GODADDY_API_SECRET }}
-      MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
-      MYSQL_APP_USER: ${{ secrets.MYSQL_APP_USER || 'saas' }}
+      MYSQL_APP_USER: ${{ github.event.inputs.mysql_app_user || secrets.MYSQL_APP_USER || 'saas' }}
       MYSQL_APP_PASSWORD: ${{ secrets.MYSQL_APP_PASSWORD }}
       MYSQL_DATABASE: ${{ vars.MYSQL_DATABASE || 'authorization' }}
       MYSQL_BIND_ADDRESS: ${{ vars.MYSQL_BIND_ADDRESS || '127.0.0.1' }}
       MYSQL_PORT: ${{ vars.MYSQL_PORT || '3306' }}
-      RABBITMQ_USERNAME: ${{ secrets.RABBITMQ_USERNAME || 'saas' }}
-      RABBITMQ_PASSWORD: ${{ secrets.RABBITMQ_PASSWORD }}
+      RABBITMQ_USERNAME: ${{ github.event.inputs.rabbitmq_username || secrets.RABBITMQ_USERNAME || 'saas' }}
       RABBITMQ_ERLANG_COOKIE: ${{ secrets.RABBITMQ_ERLANG_COOKIE }}
       RABBITMQ_DEFAULT_VHOST: ${{ vars.RABBITMQ_DEFAULT_VHOST || 'Account' }}
-      RABBITMQ_MANAGEMENT_HOST: ${{ secrets.RABBITMQ_MANAGEMENT_HOST }}
       RABBITMQ_AMQP_BIND: ${{ vars.RABBITMQ_AMQP_BIND || '127.0.0.1:5672' }}
-      REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+      REDIS_PASSWORD: ${{ github.event.inputs.redis_password || secrets.REDIS_PASSWORD }}
       REDIS_BIND_ADDRESS: ${{ vars.REDIS_BIND_ADDRESS || '127.0.0.1' }}
       REDIS_PORT: ${{ vars.REDIS_PORT || '6379' }}
       REDIS_MAXMEMORY: ${{ vars.REDIS_MAXMEMORY || '512mb' }}
@@ -110,9 +136,9 @@ jobs:
             sudo DEPLOY_ROOT='$DEPLOY_ROOT' \
               INSTALL_DOCKER='$INSTALL_DOCKER' \
               SETUP_NGINX=true \
-              SETUP_MYSQL=true \
-              SETUP_RABBITMQ=true \
-              SETUP_REDIS=true \
+              SETUP_MYSQL='${{ github.event.inputs.setup_mysql || 'true' }}' \
+              SETUP_RABBITMQ='${{ github.event.inputs.setup_rabbitmq || 'true' }}' \
+              SETUP_REDIS='${{ github.event.inputs.setup_redis || 'true' }}' \
               SETUP_SERVICES=true \
               bash /tmp/saas-server-setup/bootstrap-server.sh
           "
@@ -126,24 +152,17 @@ jobs:
           from pathlib import Path
 
           keys = [
-              "ACME_EMAIL", "TRAEFIK_DASHBOARD_HOST", "TRAEFIK_DASHBOARD_AUTH",
-              "TRAEFIK_DNS_PROVIDER", "TRAEFIK_DNS_DELAY_BEFORE_CHECK",
-              "CF_DNS_API_TOKEN", "CF_ZONE_API_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
-              "AWS_REGION", "GODADDY_API_KEY", "GODADDY_API_SECRET",
+              "ACME_EMAIL", "CF_DNS_API_TOKEN", "CF_ZONE_API_TOKEN",
               "MYSQL_ROOT_PASSWORD", "MYSQL_APP_USER", "MYSQL_APP_PASSWORD",
               "MYSQL_DATABASE", "MYSQL_BIND_ADDRESS", "MYSQL_PORT",
               "RABBITMQ_USERNAME", "RABBITMQ_PASSWORD", "RABBITMQ_ERLANG_COOKIE",
-              "RABBITMQ_DEFAULT_VHOST", "RABBITMQ_MANAGEMENT_HOST", "RABBITMQ_AMQP_BIND",
+              "RABBITMQ_DEFAULT_VHOST", "RABBITMQ_AMQP_BIND",
               "REDIS_PASSWORD", "REDIS_BIND_ADDRESS", "REDIS_PORT",
               "REDIS_MAXMEMORY", "REDIS_MAXMEMORY_POLICY",
-              "SERVICE_DOMAIN", "FRONTEND_DOMAINS", "DOCKER_API_VERSION",
+              "SERVICE_DOMAIN", "DOCKER_API_VERSION",
           ]
           defaults = {
-              "TRAEFIK_DASHBOARD_HOST": "traefik.autoleaze.com",
-              "RABBITMQ_MANAGEMENT_HOST": "rabbitmq.autoleaze.com",
               "ACME_EMAIL": "admin@autoleaze.com",
-              "TRAEFIK_DASHBOARD_AUTH": "admin:$2y$05$j9k9P.V3EshvT7psMo9E0.XU.T6mK.X5S8G9R.",
-              "RABBITMQ_ERLANG_COOKIE": "secret_erlang_cookie",
               "MYSQL_ROOT_PASSWORD": "root_password",
               "MYSQL_APP_PASSWORD": "app_password",
               "RABBITMQ_PASSWORD": "saas_password",
@@ -176,6 +195,12 @@ jobs:
           ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "
             docker network inspect public >/dev/null 2>&1 || docker network create public
             cd '$DEPLOY_ROOT/infra'
-            docker compose up -d --remove-orphans --force-recreate
-            docker compose ps
+            
+            PROFILES=''
+            [ '${{ github.event.inputs.setup_mysql || 'true' }}' = 'true' ] && PROFILES=\"$PROFILES --profile mysql\"
+            [ '${{ github.event.inputs.setup_rabbitmq || 'true' }}' = 'true' ] && PROFILES=\"$PROFILES --profile rabbitmq\"
+            [ '${{ github.event.inputs.setup_redis || 'true' }}' = 'true' ] && PROFILES=\"$PROFILES --profile redis\"
+            
+            docker compose $PROFILES up -d --remove-orphans --force-recreate
+            docker compose $PROFILES ps
           "
