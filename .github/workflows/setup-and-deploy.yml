@@ -16,8 +16,21 @@ on:
         required: true
         type: string
       acme_email:
-        description: Email for Let's Encrypt (Certbot)
+        description: Email for Traefik ACME (defaults to GitHub email if empty)
+        required: false
+        type: string
+      setup_redis:
+        description: Deploy Redis
         required: true
+        default: true
+        type: boolean
+      traefik_user:
+        description: Traefik Dashboard Username (optional)
+        required: false
+        type: string
+      traefik_password:
+        description: Traefik Dashboard Password (optional)
+        required: false
         type: string
       setup_mysql:
         description: Bootstrap and Deploy MySQL
@@ -71,6 +84,10 @@ jobs:
       SERVICE_DOMAIN: ${{ github.event.inputs.service_domain || vars.SERVICE_DOMAIN || 'autoleaze.com' }}
       MYSQL_ROOT_PASSWORD: ${{ github.event.inputs.mysql_root_password || secrets.MYSQL_ROOT_PASSWORD }}
       RABBITMQ_PASSWORD: ${{ github.event.inputs.rabbitmq_password || secrets.RABBITMQ_PASSWORD }}
+      ACME_EMAIL: ${{ github.event.inputs.acme_email || vars.ACME_EMAIL || github.event.pusher.email || github.actor_id && format('{0}@users.noreply.github.com', github.actor) || 'admin@autoleaze.com' }}
+      TRAEFIK_USER: ${{ github.event.inputs.traefik_user }}
+      TRAEFIK_PASSWORD: ${{ github.event.inputs.traefik_password }}
+      TRAEFIK_DASHBOARD_AUTH: ${{ secrets.TRAEFIK_DASHBOARD_AUTH }}
 
     steps:
       - uses: actions/checkout@v4
@@ -111,10 +128,21 @@ jobs:
               SETUP_NGINX=true \
               SETUP_MYSQL='${{ github.event.inputs.setup_mysql || 'true' }}' \
               SETUP_RABBITMQ='${{ github.event.inputs.setup_rabbitmq || 'true' }}' \
-              SETUP_REDIS=true \
+              SETUP_REDIS='${{ github.event.inputs.setup_redis || 'true' }}' \
               SETUP_SERVICES=true \
               bash /tmp/saas-server-setup/bootstrap-server.sh
           "
+
+      - name: Generate Traefik Auth
+        run: |
+          if [ -n "$TRAEFIK_USER" ] && [ -n "$TRAEFIK_PASSWORD" ]; then
+            echo "Generating Traefik Auth for user: $TRAEFIK_USER"
+            # Using Python to generate SHA1 hash for Traefik basic auth
+            HASH=$(python3 -c "import hashlib, base64; print(base64.b64encode(hashlib.sha1(\"$TRAEFIK_PASSWORD\".encode()).digest()).decode())")
+            echo "TRAEFIK_DASHBOARD_AUTH=$TRAEFIK_USER:{SHA}$HASH" >> $GITHUB_ENV
+          elif [ -z "$TRAEFIK_DASHBOARD_AUTH" ]; then
+            echo "Warning: No Traefik credentials provided. Dashboard might be unprotected or inaccessible."
+          fi
 
       - name: Render infra environment
         run: |
@@ -132,6 +160,7 @@ jobs:
               "REDIS_PASSWORD", "REDIS_BIND_ADDRESS", "REDIS_PORT",
               "REDIS_MAXMEMORY", "REDIS_MAXMEMORY_POLICY",
               "SERVICE_DOMAIN", "DOCKER_API_VERSION",
+              "TRAEFIK_DASHBOARD_AUTH",
           ]
           with Path("rendered-infra/.env").open("w") as fh:
               for key in keys:
