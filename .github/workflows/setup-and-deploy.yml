@@ -213,6 +213,9 @@ jobs:
           echo "DEBUG: Content of remote docker-compose.yml (first 10 lines):"
           ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "head -n 10 '$DEPLOY_ROOT/infra/docker-compose.yml'"
           
+          echo "DEBUG: Current Traefik image on server:"
+          ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "docker inspect traefik --format '{{.Config.Image}}' || echo 'Not found'"
+          
           ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" bash <<EOF
             set -e
             docker network inspect public >/dev/null 2>&1 || docker network create public

@@ -20,7 +20,7 @@ services:
       - "--api.dashboard=true"
       - "--providers.docker=true"
       - "--providers.docker.endpoint=unix:///var/run/docker.sock"
-      - "--providers.docker.apiVersion=1.40"
+      - "--providers.docker.apiversion=1.40"
       - "--providers.docker.exposedbydefault=false"
       - "--providers.docker.network=public"
       - "--providers.file.filename=/etc/traefik/dynamic.yml"
