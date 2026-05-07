@@ -3,10 +3,6 @@ name: Setup And Deploy Infra
 on:
   workflow_dispatch:
     inputs:
-      clean_deploy:
-        description: Clean and Re-setup all infra (WIPES ALL DATA)
-        required: true
-        type: boolean
       server_host:
         description: Server Hostname or IP Address
         required: false
@@ -74,14 +70,14 @@ jobs:
       CF_DNS_API_TOKEN: ${{ secrets.CF_DNS_API_TOKEN }}
       CF_ZONE_API_TOKEN: ${{ secrets.CF_ZONE_API_TOKEN }}
       MYSQL_DATABASE: ${{ vars.MYSQL_DATABASE || 'authorization' }}
-      MYSQL_BIND_ADDRESS: ${{ vars.MYSQL_BIND_ADDRESS || '127.0.0.1' }}
+      MYSQL_BIND_ADDRESS: ${{ vars.MYSQL_BIND_ADDRESS || '0.0.0.0' }}
       MYSQL_PORT: ${{ vars.MYSQL_PORT || '3306' }}
       RABBITMQ_USERNAME: ${{ github.event.inputs.rabbitmq_username || secrets.RABBITMQ_USERNAME || 'saas' }}
       RABBITMQ_ERLANG_COOKIE: ${{ secrets.RABBITMQ_ERLANG_COOKIE }}
       RABBITMQ_DEFAULT_VHOST: ${{ vars.RABBITMQ_DEFAULT_VHOST || 'Account' }}
       RABBITMQ_AMQP_BIND: ${{ vars.RABBITMQ_AMQP_BIND || '127.0.0.1:5672' }}
       REDIS_PASSWORD: ${{ github.event.inputs.redis_password || secrets.REDIS_PASSWORD }}
-      REDIS_BIND_ADDRESS: ${{ vars.REDIS_BIND_ADDRESS || '127.0.0.1' }}
+      REDIS_BIND_ADDRESS: ${{ vars.REDIS_BIND_ADDRESS || '0.0.0.0' }}
       REDIS_PORT: ${{ vars.REDIS_PORT || '6379' }}
       REDIS_MAXMEMORY: ${{ vars.REDIS_MAXMEMORY || '512mb' }}
       REDIS_MAXMEMORY_POLICY: ${{ vars.REDIS_MAXMEMORY_POLICY || 'allkeys-lru' }}
@@ -196,11 +192,6 @@ jobs:
             PROFILES=''
             [ '${{ github.event.inputs.setup_mysql || 'true' }}' = 'true' ] && PROFILES=\"$PROFILES --profile mysql\"
             [ '${{ github.event.inputs.setup_rabbitmq || 'true' }}' = 'true' ] && PROFILES=\"$PROFILES --profile rabbitmq\"
-            
-            if [ '${{ github.event.inputs.clean_deploy }}' = 'true' ]; then
-              echo \"Performing clean deploy... wiping all data.\"
-              docker compose $PROFILES down -v --remove-orphans
-            fi
             
             docker compose $PROFILES up -d --remove-orphans --force-recreate
             docker compose $PROFILES ps
