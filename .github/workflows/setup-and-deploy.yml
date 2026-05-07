@@ -3,6 +3,10 @@ name: Setup And Deploy Infra
 on:
   workflow_dispatch:
     inputs:
+      clean_deploy:
+        description: Clean and Re-setup all infra (WIPES ALL DATA)
+        required: true
+        type: boolean
       server_host:
         description: Server Hostname or IP Address
         required: false
@@ -192,6 +196,11 @@ jobs:
             PROFILES=''
             [ '${{ github.event.inputs.setup_mysql || 'true' }}' = 'true' ] && PROFILES=\"$PROFILES --profile mysql\"
             [ '${{ github.event.inputs.setup_rabbitmq || 'true' }}' = 'true' ] && PROFILES=\"$PROFILES --profile rabbitmq\"
+            
+            if [ '${{ github.event.inputs.clean_deploy }}' = 'true' ]; then
+              echo \"Performing clean deploy... wiping all data.\"
+              docker compose $PROFILES down -v --remove-orphans
+            fi
             
             docker compose $PROFILES up -d --remove-orphans --force-recreate
             docker compose $PROFILES ps
