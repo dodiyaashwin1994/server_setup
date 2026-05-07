@@ -199,6 +199,13 @@ jobs:
           content = content.replace("${RABBITMQ_USERNAME}", user)
           content = content.replace("${RABBITMQ_PASSWORD}", pw)
           definitions.write_text(content)
+
+          traefik_cfg = Path("rendered-infra/traefik/traefik.yml")
+          if traefik_cfg.exists():
+              content = traefik_cfg.read_text()
+              content = content.replace("${SERVICE_DOMAIN}", os.environ.get("SERVICE_DOMAIN") or "")
+              content = content.replace("${ACME_EMAIL}", os.environ.get("ACME_EMAIL") or "")
+              traefik_cfg.write_text(content)
           PY
 
       - name: Deploy infra
