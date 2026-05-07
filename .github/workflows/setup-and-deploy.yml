@@ -204,8 +204,14 @@ jobs:
       - name: Deploy infra
         run: |
           ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "mkdir -p '$DEPLOY_ROOT/infra'"
-          rsync -az --delete -e "ssh -i ~/.ssh/bootstrap_key -p $PORT -o StrictHostKeyChecking=no" \
+          echo "DEBUG: Content of local docker-compose.yml (first 10 lines):"
+          head -n 10 rendered-infra/docker-compose.yml
+          
+          rsync -az --delete -v -e "ssh -i ~/.ssh/bootstrap_key -p $PORT -o StrictHostKeyChecking=no" \
             rendered-infra/ "$USER@$HOST:$DEPLOY_ROOT/infra/"
+          
+          echo "DEBUG: Content of remote docker-compose.yml (first 10 lines):"
+          ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "head -n 10 '$DEPLOY_ROOT/infra/docker-compose.yml'"
           
           ssh -i ~/.ssh/bootstrap_key -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" bash <<EOF
             set -e

@@ -2,7 +2,7 @@ name: saas-infra
 
 services:
   traefik:
-    image: traefik:v3.1
+    image: traefik:v2.11
     container_name: traefik
     restart: unless-stopped
     security_opt:
@@ -19,6 +19,8 @@ services:
     command:
       - "--api.dashboard=true"
       - "--providers.docker=true"
+      - "--providers.docker.endpoint=unix:///var/run/docker.sock"
+      - "--providers.docker.apiVersion=1.40"
       - "--providers.docker.exposedbydefault=false"
       - "--providers.docker.network=public"
       - "--providers.file.filename=/etc/traefik/dynamic.yml"
