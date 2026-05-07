@@ -85,6 +85,7 @@ jobs:
       MYSQL_ROOT_PASSWORD: ${{ github.event.inputs.mysql_root_password || secrets.MYSQL_ROOT_PASSWORD }}
       RABBITMQ_PASSWORD: ${{ github.event.inputs.rabbitmq_password || secrets.RABBITMQ_PASSWORD }}
       DOCKER_API_VERSION: '1.40'
+      TRAEFIK_PROVIDERS_DOCKER_APIVERSION: '1.40'
       ACME_EMAIL: ${{ github.event.inputs.acme_email || vars.ACME_EMAIL || github.event.pusher.email || github.actor_id && format('{0}@users.noreply.github.com', github.actor) || 'admin@autoleaze.com' }}
       TRAEFIK_USER: ${{ github.event.inputs.traefik_user }}
       TRAEFIK_PASSWORD: ${{ github.event.inputs.traefik_password }}
@@ -161,7 +162,7 @@ jobs:
               "REDIS_PASSWORD", "REDIS_BIND_ADDRESS", "REDIS_PORT",
               "REDIS_MAXMEMORY", "REDIS_MAXMEMORY_POLICY",
               "SERVICE_DOMAIN", "DOCKER_API_VERSION",
-              "TRAEFIK_DASHBOARD_AUTH",
+              "TRAEFIK_DASHBOARD_AUTH", "TRAEFIK_PROVIDERS_DOCKER_APIVERSION",
           ]
           with Path("rendered-infra/.env").open("w") as fh:
               for key in keys:
