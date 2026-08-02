@@ -2,7 +2,7 @@ name: saas-infra
 
 services:
   traefik:
-    image: traefik:v2.11
+    image: traefik:v3.4
     container_name: traefik
     restart: unless-stopped
     security_opt:
@@ -20,6 +20,7 @@ services:
     # Command flags removed in favor of traefik.yml
     environment:
       - ACME_EMAIL=${ACME_EMAIL}
+      - HOSTINGER_API_TOKEN=${HOSTINGER_API_TOKEN}
       - SERVICE_DOMAIN=${SERVICE_DOMAIN}
       - TRAEFIK_DASHBOARD_AUTH=${TRAEFIK_DASHBOARD_AUTH}
       - DOCKER_API_VERSION=1.40
