@@ -18,9 +18,12 @@ services:
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
       - ./traefik/acme:/etc/traefik/acme
     # Command flags removed in favor of traefik.yml
+    # .env carries the DNS-provider token under lego's provider-specific key (e.g. HOSTINGER_API_TOKEN,
+    # CF_DNS_API_TOKEN), written by the render step from the generic DNS_API_TOKEN input.
+    env_file:
+      - .env
     environment:
       - ACME_EMAIL=${ACME_EMAIL}
-      - HOSTINGER_API_TOKEN=${HOSTINGER_API_TOKEN}
       - SERVICE_DOMAIN=${SERVICE_DOMAIN}
       - TRAEFIK_DASHBOARD_AUTH=${TRAEFIK_DASHBOARD_AUTH}
       - DOCKER_API_VERSION=1.40

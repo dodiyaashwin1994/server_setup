@@ -31,4 +31,4 @@ certificatesResolvers:
       email: "${ACME_EMAIL}"
       storage: /etc/traefik/acme/acme.json
       dnsChallenge:
-        provider: hostinger
+        provider: ${DNS_PROVIDER}

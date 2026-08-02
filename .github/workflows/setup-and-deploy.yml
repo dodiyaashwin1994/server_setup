@@ -31,6 +31,15 @@ on:
         description: Traefik Dashboard Hostname (e.g. traefik.example.com)
         required: false
         type: string
+      dns_provider:
+        description: DNS provider for wildcard SSL dnsChallenge (e.g. hostinger, cloudflare)
+        required: false
+        default: hostinger
+        type: string
+      dns_api_token:
+        description: DNS provider API token for dnsChallenge (leave blank to use the HOSTINGER_API_TOKEN secret)
+        required: false
+        type: string
       setup_redis:
         description: Deploy Redis
         required: true
@@ -106,6 +115,8 @@ jobs:
       DOCKER_API_VERSION: '1.40'
       TRAEFIK_PROVIDERS_DOCKER_APIVERSION: '1.40'
       ACME_EMAIL: ${{ github.event.inputs.acme_email || vars.ACME_EMAIL || github.event.pusher.email || github.actor_id && format('{0}@users.noreply.github.com', github.actor) || 'admin@autoleaze.com' }}
+      DNS_PROVIDER: ${{ github.event.inputs.dns_provider || vars.DNS_PROVIDER || 'hostinger' }}
+      DNS_API_TOKEN: ${{ github.event.inputs.dns_api_token || secrets.DNS_API_TOKEN }}
       TRAEFIK_USER: ${{ github.event.inputs.traefik_user }}
       TRAEFIK_PASSWORD: ${{ github.event.inputs.traefik_password }}
       TRAEFIK_DASHBOARD_HOST: ${{ github.event.inputs.traefik_dashboard_host || secrets.TRAEFIK_DASHBOARD_HOST || format('traefik.{0}', github.event.inputs.service_domain || vars.SERVICE_DOMAIN || 'autoleaze.com') }}
@@ -184,6 +195,7 @@ jobs:
               "SERVICE_DOMAIN", "DOCKER_API_VERSION",
               "TRAEFIK_DASHBOARD_AUTH", "TRAEFIK_PROVIDERS_DOCKER_APIVERSION",
               "TRAEFIK_DASHBOARD_HOST", "RABBITMQ_MANAGEMENT_HOST",
+              "DNS_PROVIDER",
           ]
           with Path("rendered-infra/.env").open("w") as fh:
               for key in keys:
@@ -191,6 +203,21 @@ jobs:
                   # Escape $ with $$$$ to survive double interpolation in Docker Compose
                   value = value.replace('$', '$$$$')
                   fh.write(f"{key}={value}\n")
+              # Map the generic DNS_API_TOKEN to the env var name lego expects for the chosen
+              # provider (add more providers here as needed). Written so Traefik's dnsChallenge
+              # can authenticate without hardcoding a provider-specific key in the workflow.
+              provider = (os.environ.get("DNS_PROVIDER") or "hostinger").strip().lower()
+              token = (os.environ.get("DNS_API_TOKEN") or "").replace('$', '$$$$')
+              token_env = {
+                  "hostinger": "HOSTINGER_API_TOKEN",
+                  "cloudflare": "CF_DNS_API_TOKEN",
+                  "digitalocean": "DO_AUTH_TOKEN",
+                  "godaddy": "GODADDY_API_KEY",
+                  "linode": "LINODE_TOKEN",
+                  "vultr": "VULTR_API_KEY",
+              }.get(provider, f"{provider.upper()}_API_TOKEN")
+              if token:
+                  fh.write(f"{token_env}={token}\n")
 
           definitions = Path("rendered-infra/rabbitmq/definitions.json")
           content = definitions.read_text()
@@ -205,6 +232,7 @@ jobs:
               content = traefik_cfg.read_text()
               content = content.replace("${SERVICE_DOMAIN}", os.environ.get("SERVICE_DOMAIN") or "")
               content = content.replace("${ACME_EMAIL}", os.environ.get("ACME_EMAIL") or "")
+              content = content.replace("${DNS_PROVIDER}", os.environ.get("DNS_PROVIDER") or "hostinger")
               traefik_cfg.write_text(content)
           PY
 
