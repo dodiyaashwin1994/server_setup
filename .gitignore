@@ -1,4 +1,4 @@
+infra/.env
+infra/certs/*.pem
+infra/nginx/conf.d/leezify.conf
 .DS_Store
-.env
-*.env
-private_key.txt

@@ -1,64 +1,15 @@
-# 🚀 SaaS Infrastructure Foundation (Traefik Edition)
+# leezify_server_setup
 
-A centralized, containerized infrastructure for multi-tenant SaaS deployment, featuring **Traefik v3.1**, automated **Wildcard SSL**, and managed service stacks.
+The shared services of a Leezify server: the **nginx edge** (HTTPS with the certificate files from Hostinger), **MySQL**, **Redis** and **RabbitMQ**. MySQL, Redis and RabbitMQ listen on the server itself only (127.0.0.1); the apps reach them over the docker network `public`. The firewall opens SSH, HTTP and HTTPS only.
 
-## 🏗️ Architecture Overview
-
-- **Reverse Proxy**: **Traefik** acting as the primary ingress with automatic service discovery.
-- **SSL Management**: Native Traefik ACME with Cloudflare DNS-01 challenge for **Wildcard SSL** (`*.yourdomain.com`).
-- **Core Services**: 
-  - **Redis**: Mandatory caching layer (isolated by DB index per service).
-  - **MySQL**: Master database container.
-  - **RabbitMQ**: Shared message broker with management UI.
-- **Routing Model**: Label-based. Each service "announces" its subdomain and port via Docker labels.
-
----
-
-## 🛠️ Getting Started
-
-### 1. Prerequisites
-- A fresh Ubuntu server.
-- **Cloudflare DNS**: API Token with DNS Edit permissions.
-- **GitHub Secrets**:
-  - `SERVER_HOST`: Your server IP.
-  - `SERVER_USER`: Deployment user (e.g., `root`).
-  - `BOOTSTRAP_SSH_PRIVATE_KEY_BASE64`: Your server's SSH private key.
-  - `CF_DNS_API_TOKEN`: Cloudflare credential.
-  - `TRAEFIK_DASHBOARD_AUTH`: Hashed credentials for the dashboard (`user:hashedpass`).
-
-### 2. Deployment
-Trigger the **"Setup And Deploy Infra"** workflow from the Actions tab. It will:
-1. Bootstrap the server (Docker, Networks, UFW).
-2. Start the Traefik Hub.
-3. Provision MySQL, Redis, and RabbitMQ.
-
----
-
-## 📂 Service Integration
-
-To add a new service to the infrastructure, simply add these labels to your service's `docker-compose.yml`:
-
-```yaml
-labels:
-  - "traefik.enable=true"
-  - "traefik.http.routers.${SERVICE_NAME}.rule=Host(`${SERVICE_NAME}.${SERVICE_DOMAIN}`)"
-  - "traefik.http.routers.${SERVICE_NAME}.entrypoints=websecure"
-  - "traefik.http.routers.${SERVICE_NAME}.tls=true"
-  - "traefik.http.routers.${SERVICE_NAME}.tls.certresolver=cloudflare"
-  - "traefik.http.services.${SERVICE_NAME}.loadbalancer.server.port=8000"
+```
+https://admin.<domain>                              -> ui-admin<suffix>  (the platform console)
+https://<domain>, www and <account>.<domain>        -> ui-user<suffix>   (the lease app)
 ```
 
----
-
-## 📊 Management Dashboards
-
-- **Traefik Dashboard**: `https://traefik.autoleaze.com`
-- **RabbitMQ Management**: `https://rabbitmq.autoleaze.com`
-
----
-
-## 🔐 Database Access
-
-MySQL and Redis are exposed for management from your local host:
-- **MySQL Port**: `3306`
-- **Redis Port**: `6379`
+- **Run:** push to `main` (or `dev` / `uat`), or run *Setup infrastructure*. The branch picks the GitHub environment, whose secrets come from `leezify_env/leezify_server_setup/<env>.env`.
+- **Do this first** on a new server, before deploying the authorization service, the lease service and the two UIs.
+- **The certificate:** a **wildcard** certificate from Hostinger for `*.<domain>` that also covers `<domain>` itself (the same certificate lists both names). The workflow refuses to deploy a certificate that is about to expire (14 days), does not match its key, or does not cover the domain and the wildcard. A certificate for the bare domain only would show a warning on every account address. Install or renew with `leezify_env/scripts/set-tls.sh`; renewing is manual, so note the expiry date.
+- **DNS** (Hostinger DNS zone of the domain): `A <domain>` and `A *` pointing at the server.
+- **One environment per edge:** the nginx edge serves the single domain of the environment that was deployed. Environments on one server would need an extra server block and a certificate for their own domain.
+- The edge sets `X-Forwarded-For` to the visitor's address and passes it on, so the apps log and rate-limit the real address.

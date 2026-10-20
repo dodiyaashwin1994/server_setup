@@ -1,0 +1,47 @@
+# Rendered by scripts/render_env.py into nginx/conf.d/leezify.conf. Do not edit the rendered file.
+#   https://admin.__DOMAIN__        -> the platform console   (container ui-admin__SUFFIX__)
+#   https://__DOMAIN__, www and every <account>.__DOMAIN__  -> the lease app (container ui-user__SUFFIX__)
+# The upstream names are looked up when a request arrives (Docker's resolver), so the edge starts even before the apps are deployed.
+
+resolver 127.0.0.11 valid=10s ipv6=off;
+gzip on;
+gzip_types text/plain text/css application/javascript application/json image/svg+xml;
+
+server {
+    listen 80 default_server;
+    server_name _;
+    return 301 https://$host$request_uri;
+}
+
+# anything else that reaches the server (an unknown host name) is dropped
+server {
+    listen 443 ssl default_server;
+    http2 on;
+    server_name _;
+    include snippets/ssl.conf;
+    return 444;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name admin.__DOMAIN__;
+    include snippets/ssl.conf;
+    location / {
+        set $upstream http://ui-admin__SUFFIX__:80;
+        proxy_pass $upstream;
+        include snippets/proxy.conf;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name __DOMAIN__ www.__DOMAIN__ ~^(?<account>[a-z0-9-]+)\.__DOMAIN_RE__$;
+    include snippets/ssl.conf;
+    location / {
+        set $upstream http://ui-user__SUFFIX__:80;
+        proxy_pass $upstream;
+        include snippets/proxy.conf;
+    }
+}

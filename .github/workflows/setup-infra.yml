@@ -1,0 +1,62 @@
+name: Setup infrastructure
+
+# Prepares a server: Docker, a firewall that opens only SSH/HTTP/HTTPS, then the nginx edge (HTTPS with the certificate from Hostinger), MySQL, Redis and RabbitMQ.
+# Run it once per server, before the first deploy of the services, and again to change a password or a setting. The branch picks the environment (main, dev, uat).
+on:
+  push:
+    branches: [main, dev, uat]
+  workflow_dispatch:
+
+jobs:
+  infra:
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
+    env:
+      DEPLOY_ROOT: ${{ secrets.DEPLOY_ROOT || '/opt/leezify' }}
+      HOST: ${{ secrets.SERVER_HOST }}
+      USER: ${{ secrets.SERVER_USER || 'root' }}
+      PORT: ${{ secrets.SERVER_PORT || '22' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH key
+        env:
+          SECRET_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: bash scripts/configure-ssh-key.sh
+
+      - name: Prepare the server
+        run: |
+          SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
+          scp -i "$HOME/.ssh/deploy_key" -P "$PORT" -o StrictHostKeyChecking=accept-new scripts/bootstrap-server.sh "$USER@$HOST:/tmp/bootstrap-server.sh"
+          $SSH "$USER@$HOST" "DEPLOY_ROOT='$DEPLOY_ROOT' bash /tmp/bootstrap-server.sh"
+
+      - name: Render infrastructure settings
+        env:
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+        run: python3 scripts/render_env.py
+
+      - name: Check the certificate
+        run: |
+          # the certificate must not be about to expire, must belong to the key, and must cover the domain, www and every account address (*.domain)
+          D="${{ secrets.SERVICE_DOMAIN }}"
+          openssl x509 -in infra/certs/fullchain.pem -noout -subject -enddate
+          openssl x509 -in infra/certs/fullchain.pem -noout -checkend 1209600 || { echo "::error::The certificate expires within 14 days (or already has). Install a new one with leezify_env/scripts/set-tls.sh."; exit 1; }
+          [ "$(openssl x509 -in infra/certs/fullchain.pem -noout -pubkey | openssl sha256)" = "$(openssl pkey -in infra/certs/privkey.pem -pubout | openssl sha256)" ] || { echo "::error::The private key does not belong to the certificate."; exit 1; }
+          names="$(openssl x509 -in infra/certs/fullchain.pem -noout -text | awk '/Subject Alternative Name/ {getline; print}' | tr ',' '\n' | sed -n 's/.*DNS:[[:space:]]*//p' | tr -d ' ' || true)"
+          echo "$names" | grep -qx "$D" || { echo "::error::The certificate does not cover $D."; exit 1; }
+          echo "$names" | grep -qx "\*.$D" || { echo "::error::The certificate is not a wildcard for *.$D: account addresses would show a warning."; exit 1; }
+
+      - name: Start the shared services
+        run: |
+          SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
+          rsync -az --delete -e "$SSH" infra/ "$USER@$HOST:$DEPLOY_ROOT/infra/"
+          $SSH "$USER@$HOST" bash -s <<REMOTE
+            set -euo pipefail
+            cd '$DEPLOY_ROOT/infra'
+            docker network inspect public >/dev/null 2>&1 || docker network create public
+            docker compose pull
+            docker compose up -d --remove-orphans
+            docker compose exec -T nginx nginx -t
+            docker compose exec -T nginx nginx -s reload          # a new certificate or host name is picked up without dropping connections
+            docker compose ps
+          REMOTE
