@@ -1,23 +1,19 @@
 name: Setup infrastructure
 
-# One server, many apps. Two modes (the branch picks the environment: main, dev, uat):
-#   full    First time, or to change a password / a setting: prepares the server (Docker, firewall), starts nginx, MySQL, Redis and RabbitMQ, then adds the routes below.
-#   routes  Adds, changes or removes host names only. Nothing that is installed is touched: no package install, no compose changes, no database restart.
-# A route is  host=container:port  (the container joins the docker network `public`). Every host gets its own nginx file on the server, so routes already there stay as they are.
+# Installs the shared part of a server once; the apps then publish themselves with `nginx-route` from their own deploy workflow.
+#   install       Docker, a firewall that opens SSH/HTTP/HTTPS only, nginx, MySQL, Redis, RabbitMQ, the certificates and the `nginx-route` command. Safe to re-run (a password or setting changed).
+#   certificates  Only installs or renews certificates and reloads nginx. Nothing else is touched.
+# Host names are not configured here: each app calls `nginx-route add --host app.example.com --target container:port` when it is deployed.
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: full = install / update the shared services and add the routes; routes = only add / change / remove host names
+        description: install = the whole shared setup; certificates = only install / renew certificates
         type: choice
-        options: [routes, full]
-        default: routes
-      routes:
-        description: "Hosts to add or update, host=container:port, comma separated (empty = the ROUTES secret of the environment)"
-        type: string
-        default: "app.ailease.tech=ui-user:80, admin.ailease.tech=ui-admin:80, authorization.ailease.tech=auth:8000, lease.ailease.tech=lease:8001"
-      remove:
-        description: Hosts to remove, comma separated (their site file is deleted; the app itself is not touched)
+        options: [install, certificates]
+        default: install
+      domains:
+        description: "Other domains to install a certificate for, comma separated (SERVICE_DOMAIN is always included)"
         type: string
         default: ""
 
@@ -43,68 +39,57 @@ jobs:
           SECRET_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: bash scripts/configure-ssh-key.sh
 
-      - name: Prepare the server (full only)
-        if: inputs.mode == 'full'
+      - name: Prepare the server
+        if: inputs.mode == 'install'
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
           scp -i "$HOME/.ssh/deploy_key" -P "$PORT" -o StrictHostKeyChecking=accept-new scripts/bootstrap-server.sh "$USER@$HOST:/tmp/bootstrap-server.sh"
           $SSH "$USER@$HOST" "DEPLOY_ROOT='$DEPLOY_ROOT' bash /tmp/bootstrap-server.sh"
 
-      - name: Render the settings (full only)
-        if: inputs.mode == 'full'
+      - name: Render the settings
+        if: inputs.mode == 'install'
         env:
           ALL_SECRETS: ${{ toJSON(secrets) }}
         run: python3 scripts/render_env.py
 
-      - name: Render the routes
+      - name: Render the certificates
         env:
           ALL_SECRETS: ${{ toJSON(secrets) }}
-          ROUTES_INPUT: ${{ inputs.routes }}
-          REMOVE_INPUT: ${{ inputs.remove }}
-        run: python3 scripts/render_sites.py
+          DOMAINS_INPUT: ${{ inputs.domains }}
+        run: python3 scripts/render_certs.py
 
       - name: Check the certificates
         run: |
-          SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
-          # a certificate sent now must be valid for its domain; one that is not sent must already be on the server
-          for base in $(cat .render/bases.txt); do
-            f="infra/certs/$base/fullchain.pem"
-            if [ -f "$f" ]; then
-              echo "== certificate for $base (from the secrets)"
-              openssl x509 -in "$f" -noout -subject -enddate
-              openssl x509 -in "$f" -noout -checkend 1209600 || { echo "::error::The certificate for $base expires within 14 days (or already has). Install a new one with leezify_env/scripts/set-tls.sh."; exit 1; }
-              [ "$(openssl x509 -in "$f" -noout -pubkey | openssl sha256)" = "$(openssl pkey -in infra/certs/$base/privkey.pem -pubout | openssl sha256)" ] || { echo "::error::The private key does not belong to the certificate for $base."; exit 1; }
-              names="$(openssl x509 -in "$f" -noout -text | awk '/Subject Alternative Name/ {getline; print}' | tr ',' '\n' | sed -n 's/.*DNS:[[:space:]]*//p' | tr -d ' ' || true)"
-              echo "$names" | grep -qx "\*.$base" || { echo "::error::The certificate for $base must be a wildcard (*.$base)."; exit 1; }
-            else
-              echo "== certificate for $base: not in the secrets, using the one on the server"
-              $SSH "$USER@$HOST" "test -f '$DEPLOY_ROOT/infra/certs/$base/fullchain.pem' && test -f '$DEPLOY_ROOT/infra/certs/$base/privkey.pem'" \
-                || { echo "::error::No certificate for $base on the server. Add it with: bash leezify_env/scripts/set-tls.sh <env> <cert> <key> [ca] $base, push the secrets, and run again."; exit 1; }
-            fi
+          # each must be valid for a while, belong to its key and be a wildcard for its domain (*.domain)
+          for dir in infra/certs/*/; do
+            base="$(basename "$dir")"; f="$dir/fullchain.pem"
+            echo "== $base"
+            openssl x509 -in "$f" -noout -subject -enddate
+            openssl x509 -in "$f" -noout -checkend 1209600 || { echo "::error::The certificate for $base expires within 14 days (or already has). Install a new one with leezify_env/scripts/set-tls.sh."; exit 1; }
+            [ "$(openssl x509 -in "$f" -noout -pubkey | openssl sha256)" = "$(openssl pkey -in "$dir/privkey.pem" -pubout | openssl sha256)" ] || { echo "::error::The private key does not belong to the certificate for $base."; exit 1; }
+            names="$(openssl x509 -in "$f" -noout -text | awk '/Subject Alternative Name/ {getline; print}' | tr ',' '\n' | sed -n 's/.*DNS:[[:space:]]*//p' | tr -d ' ' || true)"
+            echo "$names" | grep -qx "\*.$base" || { echo "::error::The certificate for $base must be a wildcard (*.$base)."; exit 1; }
           done
 
-      - name: Make sure the shared services are there (routes only)
-        if: inputs.mode == 'routes'
+      - name: Make sure the shared services are there
+        if: inputs.mode == 'certificates'
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
-          $SSH "$USER@$HOST" "docker ps --format '{{.Names}}' | grep -qx nginx" \
-            || { echo "::error::nginx is not running on the server. Run this workflow once with mode = full."; exit 1; }
+          $SSH "$USER@$HOST" "docker ps --format '{{.Names}}' | grep -qx nginx" || { echo "::error::nginx is not running on the server. Run this workflow once with mode = install."; exit 1; }
 
-      - name: Upload (nothing is deleted except the hosts you asked to remove)
+      - name: Upload
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
-          $SSH "$USER@$HOST" "mkdir -p '$DEPLOY_ROOT/infra/nginx/sites' '$DEPLOY_ROOT/infra/certs' && cd '$DEPLOY_ROOT/infra/nginx' && rm -f /tmp/sites-backup.tgz && tar -czf /tmp/sites-backup.tgz sites"
-          if [ "$MODE" = full ]; then
-            rsync -az --delete --exclude 'nginx/sites/' --exclude 'certs/' -e "$SSH" infra/ "$USER@$HOST:$DEPLOY_ROOT/infra/"
+          $SSH "$USER@$HOST" "mkdir -p '$DEPLOY_ROOT/infra/nginx/sites' '$DEPLOY_ROOT/infra/certs'"
+          if [ "$MODE" = install ]; then
+            # the host files written by nginx-route (sites/) and the certificates are never deleted by a sync
+            rsync -az --delete --exclude 'nginx/sites/' --exclude 'certs/' --exclude '.nginx-route.lock' -e "$SSH" infra/ "$USER@$HOST:$DEPLOY_ROOT/infra/"
+            sed "s|__INFRA_DIR__|$DEPLOY_ROOT/infra|" scripts/nginx-route.sh | $SSH "$USER@$HOST" "cat > /usr/local/bin/nginx-route && chmod 755 /usr/local/bin/nginx-route"
           fi
-          rsync -az -e "$SSH" infra/nginx/sites/ "$USER@$HOST:$DEPLOY_ROOT/infra/nginx/sites/"
-          [ -d infra/certs ] && rsync -az --exclude '.gitkeep' -e "$SSH" infra/certs/ "$USER@$HOST:$DEPLOY_ROOT/infra/certs/" || true
-          for h in $(cat .render/remove.txt); do
-            $SSH "$USER@$HOST" "rm -f '$DEPLOY_ROOT/infra/nginx/sites/$h.conf'"
-          done
+          rsync -az --exclude '.gitkeep' -e "$SSH" infra/certs/ "$USER@$HOST:$DEPLOY_ROOT/infra/certs/"
 
-      - name: Start the shared services (full only)
-        if: inputs.mode == 'full'
+      - name: Start the shared services
+        if: inputs.mode == 'install'
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
           $SSH "$USER@$HOST" bash -s <<REMOTE
@@ -119,15 +104,10 @@ jobs:
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
           $SSH "$USER@$HOST" bash -s <<REMOTE
-            set -uo pipefail
+            set -euo pipefail
             cd '$DEPLOY_ROOT/infra'
-            if docker compose exec -T nginx nginx -t; then
-              docker compose exec -T nginx nginx -s reload
-              echo "Hosts now served:"; ls nginx/sites | sed 's/\.conf$//' | grep -v '^\.' || true
-            else
-              echo "::error::nginx rejected the new files: putting the previous host files back."
-              rm -rf nginx/sites && tar -xzf /tmp/sites-backup.tgz -C nginx
-              exit 1
-            fi
+            docker compose exec -T nginx nginx -t
+            docker compose exec -T nginx nginx -s reload
+            echo "Hosts served now:"; nginx-route list || true
             docker compose ps
           REMOTE
