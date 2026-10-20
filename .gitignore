@@ -1,4 +1,5 @@
 infra/.env
-infra/certs/*.pem
-infra/nginx/conf.d/leezify.conf
 .DS_Store
+.render/
+infra/certs/*/
+infra/nginx/sites/*.conf

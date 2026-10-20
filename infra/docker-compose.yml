@@ -1,6 +1,6 @@
 name: leezify-infra
 
-# Shared services of the server: the nginx edge (HTTPS with the certificate files from Hostinger), MySQL, Redis and RabbitMQ.
+# Shared services of the server: the nginx edge (HTTPS, one site file per host name, certificates from Hostinger), MySQL, Redis and RabbitMQ.
 # MySQL, Redis and RabbitMQ listen on this machine only (127.0.0.1); the applications reach them over the docker network `public`.
 services:
   nginx:
@@ -13,6 +13,7 @@ services:
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/snippets:/etc/nginx/snippets:ro
+      - ./nginx/sites:/etc/nginx/sites:ro
       - ./certs:/etc/nginx/certs:ro
     networks:
       - public
