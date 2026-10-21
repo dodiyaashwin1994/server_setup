@@ -1,6 +1,6 @@
 name: infra
 
-# Shared services of the server: the nginx edge (HTTPS, one site file per host name; the certificates are put there by each service's deploy), MySQL, Redis and RabbitMQ.
+# Shared services of the server: the nginx edge (HTTPS, one site file per host name), certbot (free Let's Encrypt certificates, requested by `nginx-route add` and renewed here), MySQL, Redis and RabbitMQ.
 # Applications reach MySQL, Redis and RabbitMQ over the docker network `public`. The published ports below are for tools on the server (or an SSH tunnel): they listen on 127.0.0.1
 # unless the Setup infrastructure workflow was given another bind address. NOTE: a published port is open to whoever can reach that address, ufw does not filter it (docker bypasses it).
 services:
@@ -15,7 +15,11 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/snippets:/etc/nginx/snippets:ro
       - ./nginx/sites:/etc/nginx/sites:ro
-      - ./certs:/etc/nginx/certs:ro
+      - ./certs:/etc/nginx/certs:ro                 # certificates a service brought as files (optional)
+      - ./letsencrypt:/etc/letsencrypt:ro           # Let's Encrypt certificates (certbot writes them)
+      - ./acme-webroot:/var/www/certbot:ro          # where Let's Encrypt's challenge answers are served from
+    # nginx reads certificates when it starts: reload now and then so a renewed one is picked up
+    command: ["/bin/sh", "-c", "(while :; do sleep 6h; nginx -s reload; done) & exec nginx -g 'daemon off;'"]
     networks:
       - public
     healthcheck:
@@ -23,6 +27,18 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  certbot:
+    image: certbot/certbot:v3.0.1
+    container_name: certbot
+    restart: unless-stopped
+    # renews every certificate that is due (Let's Encrypt certificates last 90 days; certbot renews from 30 days before the end). New ones are requested by nginx-route.
+    entrypoint: ["/bin/sh", "-c", "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"]
+    volumes:
+      - ./letsencrypt:/etc/letsencrypt
+      - ./acme-webroot:/var/www/certbot
+    networks:
+      - public
 
   mysql:
     image: mysql:8.0

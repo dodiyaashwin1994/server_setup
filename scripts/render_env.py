@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Writes infra/.env (read by docker compose) from the values the Setup infrastructure workflow was given: the MySQL user and password, the Redis and RabbitMQ passwords and the bind addresses of their ports."""
+"""Writes infra/.env (read by docker compose and by nginx-route) from the values the Setup infrastructure workflow was given: the MySQL user and password, the Redis and RabbitMQ passwords,
+the bind addresses of their ports and the e-mail address for Let's Encrypt."""
 import ipaddress
 import os
 import re
@@ -7,7 +8,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent / 'infra'
-REQUIRED = ('MYSQL_PASSWORD', 'REDIS_PASSWORD', 'RABBITMQ_USERNAME', 'RABBITMQ_PASSWORD')
+REQUIRED = ('MYSQL_PASSWORD', 'REDIS_PASSWORD', 'RABBITMQ_USERNAME', 'RABBITMQ_PASSWORD', 'ACME_EMAIL')
 BINDS = ('MYSQL_BIND_ADDRESS', 'REDIS_BIND_ADDRESS', 'RABBITMQ_BIND_ADDRESS')
 
 
@@ -25,6 +26,9 @@ def main():
     # the image sets the password of root; another user is created by mysql/ensure-user.sh with the same password
     pairs = [('MYSQL_USERNAME', user), ('MYSQL_PASSWORD', os.environ['MYSQL_PASSWORD']), ('MYSQL_ROOT_PASSWORD', os.environ['MYSQL_PASSWORD'])]
     pairs += [(n, os.environ[n]) for n in REQUIRED if n != 'MYSQL_PASSWORD']
+    if not re.fullmatch(r'[^@\s]+@[^@\s]+\.[A-Za-z]{2,}', os.environ['ACME_EMAIL']):
+        sys.exit('ACME_EMAIL must be an e-mail address (Let\'s Encrypt writes to it before a certificate expires)')
+    pairs.append(('ACME_STAGING', 'true' if get('ACME_STAGING').lower() == 'true' else 'false'))
     for n in BINDS:
         value = get(n, '127.0.0.1')
         try:

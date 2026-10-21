@@ -2,7 +2,8 @@ name: Setup infrastructure
 
 # Installs the shared part of a server, once: Docker, a firewall that opens SSH / HTTP / HTTPS, the nginx edge, MySQL, Redis and RabbitMQ, and the `nginx-route` command.
 # Run it for a new server, or again to change a password or a bind address (the host files and certificates the services have put on the server are kept; the services of your applications are not touched; MySQL's root password is only set on the very first start, see the README).
-# Each service then publishes its own address AND brings its own certificate when it is deployed (see its deploy workflow); this workflow knows no app and no certificate.
+# Each service then publishes its own address when it is deployed (see its deploy workflow); this workflow knows no app. HTTPS certificates are free Let's Encrypt ones: `nginx-route add`
+# requests one for every host name the first time it is published (the name must point to this server and port 80 must be reachable), and the certbot container renews them.
 
 #
 # Everything is asked here, as inputs of the run: nothing is read from secrets or variables of this repository, except the SSH private key (the secret SSH_PRIVATE_KEY of the
@@ -58,6 +59,14 @@ on:
         description: "Address RabbitMQ's published port listens on (127.0.0.1 = this machine only)"
         type: string
         default: 127.0.0.1
+      acme_email:
+        description: "E-mail address for Let's Encrypt (it writes to it before a certificate expires)"
+        type: string
+        required: true
+      acme_staging:
+        description: "Use Let's Encrypt's test service (certificates browsers do not trust, no rate limits): to try the first deploys. Leave off for real use"
+        type: boolean
+        default: false
       rabbitmq_domain:
         description: "Host name of the RabbitMQ management page, e.g. rabbitmq.example.com (empty = not published). Needs a certificate: see the README"
         type: string
@@ -88,6 +97,8 @@ jobs:
       RABBITMQ_USERNAME: ${{ inputs.rabbitmq_username }}
       RABBITMQ_PASSWORD: ${{ inputs.rabbitmq_password }}
       RABBITMQ_BIND_ADDRESS: ${{ inputs.rabbitmq_bind_address }}
+      ACME_EMAIL: ${{ inputs.acme_email }}
+      ACME_STAGING: ${{ inputs.acme_staging }}
       RABBITMQ_DOMAIN: ${{ inputs.rabbitmq_domain }}
       RABBITMQ_ALLOWED_IPS: ${{ inputs.rabbitmq_allowed_ips }}
     steps:
@@ -124,9 +135,9 @@ jobs:
       - name: Upload
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
-          $SSH "$USER@$HOST" "mkdir -p '$INFRA_ROOT/nginx/sites' '$INFRA_ROOT/certs'"
+          $SSH "$USER@$HOST" "mkdir -p '$INFRA_ROOT/nginx/sites' '$INFRA_ROOT/certs' '$INFRA_ROOT/letsencrypt' '$INFRA_ROOT/acme-webroot'"
           # the host files and certificates put there by the services' deploys (nginx-route) are never deleted by a sync
-          rsync -az --delete --exclude 'nginx/sites/' --exclude 'certs/' --exclude '.nginx-route.lock' -e "$SSH" infra/ "$USER@$HOST:$INFRA_ROOT/"
+          rsync -az --delete --exclude 'nginx/sites/' --exclude 'certs/' --exclude 'letsencrypt/' --exclude 'acme-webroot/' --exclude '.nginx-route.lock' -e "$SSH" infra/ "$USER@$HOST:$INFRA_ROOT/"
           sed "s|__INFRA_DIR__|$INFRA_ROOT|" scripts/nginx-route.sh | $SSH "$USER@$HOST" "cat > /usr/local/bin/nginx-route && chmod 755 /usr/local/bin/nginx-route"
 
       - name: Start the shared services
@@ -153,8 +164,8 @@ jobs:
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
           ALLOW_ARGS=""; [ -z "$RABBITMQ_ALLOWED_IPS" ] || ALLOW_ARGS="--allow $RABBITMQ_ALLOWED_IPS"
-          # the certificate is not handled here: the one a service has installed for this domain is used. Without one this is a warning, not a failure (the install above is complete).
+          # a certificate for the domain is requested from Let's Encrypt by nginx-route (the name must point to this server). A failure here is a warning: the install above is complete.
           if ! $SSH "$USER@$HOST" "nginx-route add --host $RABBITMQ_DOMAIN --target rabbitmq:15672 $ALLOW_ARGS"; then
-            echo "::warning::The RabbitMQ page https://$RABBITMQ_DOMAIN was not published: there is no certificate for its domain on the server yet. Deploy a service of the same domain first (it installs the certificate), then run this workflow again."
+            echo "::warning::The RabbitMQ page https://$RABBITMQ_DOMAIN was not published (see the message above). Usually the name does not point to this server yet (add its A record) or port 80 is blocked; fix it and run this workflow again."
           fi
           [ -n "$ALLOW_ARGS" ] || echo "::notice::The RabbitMQ page is open to every address; only the RabbitMQ login protects it. Consider rabbitmq_allowed_ips."
