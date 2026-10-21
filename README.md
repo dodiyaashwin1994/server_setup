@@ -40,10 +40,12 @@ No. The apps reach MySQL, Redis and RabbitMQ through the docker network (`mysql`
 nginx-route add    --host app.example.com --target ui-user:80 [--cert FILE --key FILE] [--cert-domain example.com] [--max-body 15m] [--deny /internal,/admin] [--allow IP,IP/mask]
 nginx-route remove --host app.example.com
 nginx-route list
+nginx-route check  [--host app.example.com] [--warn-days 30]
 ```
 
 - The app's deploy workflow runs it over SSH after `docker compose up`. Inputs: domain, subdomain, port; the container is the app's alias on the network `public`.
 - **Certificates come with the service**: its env holds `TLS_CERT_PEM_BASE64` / `TLS_KEY_PEM_BASE64`; the deploy uploads them and `nginx-route` checks them (not expired, matches the key, covers the host) and installs them in `certs/<domain>/` (the host's parent when the certificate is a wildcard for it, else the host itself), keeping a copy only on the server. Without a certificate in the env, the one already installed for that domain is used; if there is none the deploy fails and says so. If nginx rejects the result, the previous host file and certificate are put back.
+- **`nginx-route check`** is run by every service deploy after it publishes: nginx is running and passes its test, and the host's certificate is readable, not expired (a warning 30 days before the end), covers the host, matches its key and has its intermediate certificate. It exits 1 on a failure, which fails the deploy. (It exists in the `nginx-route` that this workflow installs: run Setup infrastructure again after updating this repository.)
 - One file per host (`nginx/sites/<host>.conf`): other apps' routes are never touched; two apps deploying at once wait for each other (lock). The container does not have to be running when its route is added.
 
 ## DNS (the domain's DNS zone)

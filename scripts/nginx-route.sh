@@ -5,6 +5,7 @@
 #   nginx-route add    --host app.example.com --target container:port [--cert FILE --key FILE] [--cert-domain example.com] [--max-body 15m] [--deny /internal,/admin] [--allow 203.0.113.0/24,198.51.100.7]
 #   nginx-route remove --host app.example.com
 #   nginx-route list
+#   nginx-route check  [--host app.example.com] [--warn-days 30]
 #
 # The container must be on the docker network `public` (it does not have to be running yet: the name is looked up when a request arrives).
 # The certificate comes with the service: --cert (the certificate, with its intermediates) and --key are checked (not expired, matches the key, covers the host) and installed in
@@ -12,6 +13,8 @@
 # installed for that domain is used (--cert-domain names another one).
 # --deny lists path prefixes the internet must not reach (they answer 404 at the edge; containers on the docker network still reach them directly).
 # --allow lists the addresses (IPv4 / IPv6, with or without /mask) that may use this host; everyone else gets 403. Without it the host is open to everyone.
+# check: is nginx running, does its configuration pass, and is the certificate of the host (of every host without --host) valid: parses, not expired (warns when it ends within
+# --warn-days), covers the host, belongs to its key, has its intermediate certificate. Exits 1 when something is wrong.
 # nginx is tested before it reloads; when it rejects the change the previous state is put back and the command fails.
 set -euo pipefail
 INFRA_DIR="${NGINX_ROUTE_INFRA:-__INFRA_DIR__}"
@@ -19,10 +22,10 @@ NGINX="${NGINX_ROUTE_NGINX:-docker exec nginx nginx}"
 SITES="$INFRA_DIR/nginx/sites"; CERTS="$INFRA_DIR/certs"; TEMPLATE="$INFRA_DIR/nginx/site.conf.template"
 
 die() { echo "nginx-route: $*" >&2; exit 1; }
-usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 cmd="${1:-}"; [ -n "$cmd" ] || usage; shift
-host=""; target=""; cert_domain=""; max_body="15m"; deny=""; cert_file=""; key_file=""; allow=""
+host=""; target=""; cert_domain=""; max_body="15m"; deny=""; cert_file=""; key_file=""; allow=""; warn_days="30"
 while [ $# -gt 0 ]; do
   case "$1" in
     --host) host="${2:-}"; shift 2 ;;
@@ -31,6 +34,7 @@ while [ $# -gt 0 ]; do
     --max-body) max_body="${2:-}"; shift 2 ;;
     --deny) deny="${2:-}"; shift 2 ;;
     --allow) allow="${2:-}"; shift 2 ;;
+    --warn-days) warn_days="${2:-}"; shift 2 ;;
     --cert) cert_file="${2:-}"; shift 2 ;;
     --key) key_file="${2:-}"; shift 2 ;;
     *) die "unknown option $1" ;;
@@ -58,6 +62,10 @@ check_certificate() {   # cert, key, host, parent-or-empty: dies unless usable; 
   if [ -n "$par" ] && printf '%s\n' "$names" | grep -qx "\*.$par"; then echo "$par"
   elif printf '%s\n' "$names" | grep -qx "$h"; then echo "$h"
   else die "the certificate does not cover $h (it covers: $(printf '%s' "$names" | tr '\n' ' '))"; fi
+}
+
+nginx_running() {   # with a stand-in nginx command (tests) there is no container to look for
+  [ -n "${NGINX_ROUTE_NGINX:-}" ] || docker ps --filter name=^nginx$ --filter status=running -q | grep -q .
 }
 
 CERT_BASE=""; CERT_BACKUP=""; CERT_HAD=""
@@ -133,6 +141,37 @@ case "$cmd" in
     ;;
   list)
     for f in "$SITES"/*.conf; do [ -f "$f" ] && head -1 "$f" | sed 's/^# //'; done | sort
+    ;;
+  check)
+    [[ "$warn_days" =~ ^[0-9]{1,4}$ ]] || die "--warn-days must be a number of days"
+    fails=0
+    say() { printf '%-5s %s\n' "$1" "$2"; [ "$1" != FAIL ] || fails=$((fails + 1)); }
+    if nginx_running; then say OK "nginx is running"; else say FAIL "nginx is not running (docker ps shows no running container named nginx)"; fi
+    if out="$($NGINX -t 2>&1)"; then say OK "nginx configuration test passed"; else say FAIL "nginx configuration test failed: $(printf '%s' "$out" | tail -1)"; fi
+    hosts=()
+    if [ -n "$host" ]; then hosts=("$host"); else for f in "$SITES"/*.conf; do [ -f "$f" ] && hosts+=("$(basename "$f" .conf)"); done; fi
+    [ ${#hosts[@]} -gt 0 ] || say WARN "no host is published yet"
+    for h in ${hosts[@]+"${hosts[@]}"}; do
+      conf="$SITES/$h.conf"
+      [ -f "$conf" ] || { say FAIL "$h: no site file ($conf)"; continue; }
+      cert="$CERTS/$(awk '/^[[:space:]]*ssl_certificate[[:space:]]/ {print $2}' "$conf" | tr -d ';' | sed 's|^/etc/nginx/certs/||')"
+      key="$CERTS/$(awk '/^[[:space:]]*ssl_certificate_key[[:space:]]/ {print $2}' "$conf" | tr -d ';' | sed 's|^/etc/nginx/certs/||')"
+      if [ ! -f "$cert" ] || [ ! -f "$key" ]; then say FAIL "$h: certificate files are missing ($cert)"; continue; fi
+      if ! openssl x509 -in "$cert" -noout >/dev/null 2>&1; then say FAIL "$h: $cert is not a readable certificate"; continue; fi
+      ends="$(openssl x509 -in "$cert" -noout -enddate | cut -d= -f2)"
+      if ! openssl x509 -in "$cert" -noout -checkend 0 >/dev/null; then say FAIL "$h: the certificate expired on $ends"
+      elif ! openssl x509 -in "$cert" -noout -checkend $((warn_days * 86400)) >/dev/null; then say WARN "$h: the certificate expires on $ends (within $warn_days days): renew it"
+      else say OK "$h: certificate valid until $ends"; fi
+      names="$(san_names "$cert")"; parent="${h#*.}"
+      if printf '%s\n' "$names" | grep -qx "$h" || printf '%s\n' "$names" | grep -qx "\*.$parent"; then say OK "$h: the certificate covers the host"
+      else say FAIL "$h: the certificate does not cover the host (it covers: $(printf '%s' "$names" | tr '\n' ' '))"; fi
+      if [ "$(openssl x509 -in "$cert" -noout -pubkey | openssl sha256)" = "$(openssl pkey -in "$key" -pubout </dev/null 2>/dev/null | openssl sha256)" ]; then say OK "$h: the private key matches the certificate"
+      else say FAIL "$h: the private key does not belong to the certificate"; fi
+      if [ "$(grep -c 'BEGIN CERTIFICATE' "$cert")" -lt 2 ] && [ "$(openssl x509 -in "$cert" -noout -subject_hash)" != "$(openssl x509 -in "$cert" -noout -issuer_hash)" ]; then
+        say WARN "$h: the file has no intermediate certificate: some browsers and tools will not trust it (add the CA bundle after the certificate)"
+      fi
+    done
+    [ "$fails" -eq 0 ] || exit 1
     ;;
   *) usage ;;
 esac
