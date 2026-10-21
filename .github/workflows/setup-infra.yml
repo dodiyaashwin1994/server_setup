@@ -1,7 +1,7 @@
 name: Setup infrastructure
 
 # Installs the shared part of a server, once: Docker, a firewall that opens SSH / HTTP / HTTPS, the nginx edge, MySQL, Redis and RabbitMQ, and the `nginx-route` command.
-# Run it for a new server, or again to change a password or a bind address (the host files and certificates the services have put on the server are kept).
+# Run it for a new server, or again to change a password or a bind address (the host files and certificates the services have put on the server are kept; MySQL's root password is only set on the very first start, see the README).
 # Each service then publishes its own address AND brings its own certificate when it is deployed (see its deploy workflow); this workflow knows no app and no certificate.
 #
 # Every value can be typed here or kept as a secret of the GitHub environment (the branch picks it: main, dev, uat); what is typed wins.
@@ -25,8 +25,12 @@ on:
         description: Folder on the server
         type: string
         default: /opt/leezify
-      mysql_root_password:
-        description: MySQL root password
+      mysql_username:
+        description: "MySQL user the services log in with (root, or another user that is created with every privilege)"
+        type: string
+        default: root
+      mysql_password:
+        description: MySQL password of that user (also the password of root)
         type: string
         required: false
       mysql_bind_address:
@@ -67,7 +71,8 @@ jobs:
       USER: ${{ inputs.ssh_user || secrets.SERVER_USER || 'root' }}
       PORT: ${{ inputs.ssh_port || secrets.SERVER_PORT || '22' }}
       DEPLOY_ROOT: ${{ inputs.deploy_root || secrets.DEPLOY_ROOT || '/opt/leezify' }}
-      MYSQL_ROOT_PASSWORD: ${{ inputs.mysql_root_password || secrets.MYSQL_ROOT_PASSWORD }}
+      MYSQL_USERNAME: ${{ inputs.mysql_username || secrets.MYSQL_USERNAME || 'root' }}
+      MYSQL_PASSWORD: ${{ inputs.mysql_password || secrets.MYSQL_PASSWORD || secrets.MYSQL_ROOT_PASSWORD }}
       MYSQL_BIND_ADDRESS: ${{ inputs.mysql_bind_address || vars.MYSQL_BIND_ADDRESS || '127.0.0.1' }}
       REDIS_PASSWORD: ${{ inputs.redis_password || secrets.REDIS_PASSWORD }}
       REDIS_BIND_ADDRESS: ${{ inputs.redis_bind_address || vars.REDIS_BIND_ADDRESS || '127.0.0.1' }}
@@ -80,9 +85,10 @@ jobs:
       - name: Check the values
         run: |
           # keep typed passwords out of the logs
-          for v in MYSQL_ROOT_PASSWORD REDIS_PASSWORD RABBITMQ_PASSWORD; do [ -n "${!v}" ] && echo "::add-mask::${!v}"; done
+          for v in MYSQL_PASSWORD REDIS_PASSWORD RABBITMQ_PASSWORD; do [ -n "${!v}" ] && echo "::add-mask::${!v}"; done
           [ -n "$HOST" ] || { echo "::error::Give the server's IP address (input server_host, or the SERVER_HOST secret)."; exit 1; }
-          for v in MYSQL_ROOT_PASSWORD REDIS_PASSWORD RABBITMQ_PASSWORD; do [ -n "${!v}" ] || { echo "::error::$v is empty: type it as an input or add it as a secret of the '${{ github.ref_name }}' environment."; exit 1; }; done
+          for v in MYSQL_PASSWORD REDIS_PASSWORD RABBITMQ_PASSWORD; do [ -n "${!v}" ] || { echo "::error::$v is empty: type it as an input or add it as a secret of the '${{ github.ref_name }}' environment."; exit 1; }; done
+          [[ "$MYSQL_USERNAME" =~ ^[A-Za-z0-9_]{1,32}$ ]] || { echo "::error::The MySQL user must be letters, digits and _ (at most 32)."; exit 1; }
           [[ "$HOST$USER$PORT" =~ ^[A-Za-z0-9._@:-]+$ ]] || { echo "::error::The host, user or port has unexpected characters."; exit 1; }
           [[ "$DEPLOY_ROOT" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "::error::The folder must be an absolute path without spaces."; exit 1; }
 
@@ -117,6 +123,10 @@ jobs:
             docker network inspect public >/dev/null 2>&1 || docker network create public
             docker compose pull
             docker compose up -d --remove-orphans
+            echo "Waiting for MySQL..."
+            for i in \$(seq 1 60); do [ "\$(docker inspect -f '{{.State.Health.Status}}' mysql 2>/dev/null)" = healthy ] && break; sleep 3; done
+            set -a; . ./.env; set +a
+            bash mysql/ensure-user.sh
             docker compose exec -T nginx nginx -t
             docker compose exec -T nginx nginx -s reload
             echo "Hosts served now:"; nginx-route list || true

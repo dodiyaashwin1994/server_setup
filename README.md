@@ -8,16 +8,19 @@ The shared part of a server that hosts several apps: the **nginx edge**, **MySQL
 |---|---|
 | `server_host` | IP address of the server to set up (or the `SERVER_HOST` secret). |
 | `ssh_user`, `ssh_port`, `deploy_root` | `root`, `22`, `/opt/leezify` by default. |
-| `mysql_root_password` | MySQL root password. |
+| `mysql_username` | The MySQL user the services log in with: `root` (default), or another name, which is created with every privilege (the lease service creates a database per account). |
+| `mysql_password` | That user's password (also root's). |
 | `redis_password` | Redis password. |
 | `rabbitmq_username`, `rabbitmq_password` | RabbitMQ login. |
 | `*_bind_address` | Address the published port of MySQL / Redis / RabbitMQ listens on. **Leave `127.0.0.1`** (see below). |
 
-Every value can instead be a secret of the GitHub environment (`SERVER_HOST`, `MYSQL_ROOT_PASSWORD`, `REDIS_PASSWORD`, `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD`; the SSH key is always the secret `SSH_PRIVATE_KEY`); what is typed wins. **Prefer secrets for passwords**: a typed input stays visible to everyone who can read this repository's workflow runs (the workflow masks it in the logs only). The branch (`main`, `dev`, `uat`) picks the environment whose secrets are used. dev and uat run on main's server: do not run this for them.
+Every value can instead be a secret of the GitHub environment (`SERVER_HOST`, `MYSQL_USERNAME`, `MYSQL_PASSWORD`, `REDIS_PASSWORD`, `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD`; the SSH key is always the secret `SSH_PRIVATE_KEY`); what is typed wins. **Prefer secrets for passwords**: a typed input stays visible to everyone who can read this repository's workflow runs (the workflow masks it in the logs only). The branch (`main`, `dev`, `uat`) picks the environment whose secrets are used. dev and uat run on main's server: do not run this for them.
 
 It prepares Docker and a firewall (SSH, 80, 443), starts the four services, installs `nginx-route`, and is safe to run again (a password or setting changed). The host files and certificates the services have put on the server are kept.
 
-The passwords you give here must be the ones the services use: `DB_PASSWORD`, `REDIS_PASSWORD`, `RABBITMQ_PASSWORD` of the service env files.
+The values you give here must be the ones the services use: `DB_USERNAME` and `DB_PASSWORD` (MySQL), `REDIS_PASSWORD`, `RABBITMQ_USERNAME` and `RABBITMQ_PASSWORD` of the service env files.
+
+**MySQL, on a server that already has data:** the MySQL image sets root's password only on the very first start, so typing a different password later does not change root's. A non-root user is created or updated on every run (`infra/mysql/ensure-user.sh`: create if missing, set the password, grant everything), so *its* password can be changed by running the workflow again. To change root's password, do it in MySQL (`ALTER USER`).
 
 ### Do you need a bind address?
 No. The apps reach MySQL, Redis and RabbitMQ through the docker network (`mysql`, `redis`, `rabbitmq`), which does not use the published ports at all. The published ports exist only for tools on the server itself (or an SSH tunnel, e.g. `ssh -L 3306:127.0.0.1:3306`), so `127.0.0.1` is right. Binding to `0.0.0.0` or the public IP puts the database on the internet: docker publishes ports around `ufw`, so the firewall does **not** protect it. Use it only for a private network address and with a firewall in front. The RabbitMQ management page (15672) is always local.
