@@ -1,21 +1,58 @@
 name: Setup infrastructure
 
-# Installs the shared part of a server once; the apps then publish themselves with `nginx-route` from their own deploy workflow.
-#   install       Docker, a firewall that opens SSH/HTTP/HTTPS only, nginx, MySQL, Redis, RabbitMQ, the certificates and the `nginx-route` command. Safe to re-run (a password or setting changed).
-#   certificates  Only installs or renews certificates and reloads nginx. Nothing else is touched.
-# Host names are not configured here: each app calls `nginx-route add --host app.example.com --target container:port` when it is deployed.
+# Installs the shared part of a server, once: Docker, a firewall that opens SSH / HTTP / HTTPS, the nginx edge, MySQL, Redis and RabbitMQ, and the `nginx-route` command.
+# Run it for a new server, or again to change a password or a bind address (the host files and certificates the services have put on the server are kept).
+# Each service then publishes its own address AND brings its own certificate when it is deployed (see its deploy workflow); this workflow knows no app and no certificate.
+#
+# Every value can be typed here or kept as a secret of the GitHub environment (the branch picks it: main, dev, uat); what is typed wins.
+# Prefer secrets for the passwords: a typed input is visible to everyone who can read this repository's workflow runs.
 on:
   workflow_dispatch:
     inputs:
-      mode:
-        description: install = the whole shared setup; certificates = only install / renew certificates
-        type: choice
-        options: [install, certificates]
-        default: install
-      domains:
-        description: "Other domains to install a certificate for, comma separated (SERVICE_DOMAIN is always included)"
+      server_host:
+        description: IP address (or host name) of the server to set up
         type: string
-        default: ""
+        required: false
+      ssh_user:
+        description: SSH user
+        type: string
+        default: root
+      ssh_port:
+        description: SSH port
+        type: string
+        default: "22"
+      deploy_root:
+        description: Folder on the server
+        type: string
+        default: /opt/leezify
+      mysql_root_password:
+        description: MySQL root password
+        type: string
+        required: false
+      mysql_bind_address:
+        description: "Address MySQL's published port listens on. Not needed: 127.0.0.1 (this machine only) is enough, apps use the docker network"
+        type: string
+        default: 127.0.0.1
+      redis_password:
+        description: Redis password
+        type: string
+        required: false
+      redis_bind_address:
+        description: "Address Redis's published port listens on (127.0.0.1 = this machine only)"
+        type: string
+        default: 127.0.0.1
+      rabbitmq_username:
+        description: RabbitMQ user
+        type: string
+        default: root
+      rabbitmq_password:
+        description: RabbitMQ password
+        type: string
+        required: false
+      rabbitmq_bind_address:
+        description: "Address RabbitMQ's published port listens on (127.0.0.1 = this machine only)"
+        type: string
+        default: 127.0.0.1
 
 concurrency:
   group: infra-${{ github.ref_name }}
@@ -26,70 +63,52 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name }}
     env:
-      DEPLOY_ROOT: ${{ secrets.DEPLOY_ROOT || '/opt/leezify' }}
-      HOST: ${{ secrets.SERVER_HOST }}
-      USER: ${{ secrets.SERVER_USER || 'root' }}
-      PORT: ${{ secrets.SERVER_PORT || '22' }}
-      MODE: ${{ inputs.mode }}
+      HOST: ${{ inputs.server_host || secrets.SERVER_HOST }}
+      USER: ${{ inputs.ssh_user || secrets.SERVER_USER || 'root' }}
+      PORT: ${{ inputs.ssh_port || secrets.SERVER_PORT || '22' }}
+      DEPLOY_ROOT: ${{ inputs.deploy_root || secrets.DEPLOY_ROOT || '/opt/leezify' }}
+      MYSQL_ROOT_PASSWORD: ${{ inputs.mysql_root_password || secrets.MYSQL_ROOT_PASSWORD }}
+      MYSQL_BIND_ADDRESS: ${{ inputs.mysql_bind_address || vars.MYSQL_BIND_ADDRESS || '127.0.0.1' }}
+      REDIS_PASSWORD: ${{ inputs.redis_password || secrets.REDIS_PASSWORD }}
+      REDIS_BIND_ADDRESS: ${{ inputs.redis_bind_address || vars.REDIS_BIND_ADDRESS || '127.0.0.1' }}
+      RABBITMQ_USERNAME: ${{ inputs.rabbitmq_username || secrets.RABBITMQ_USERNAME || 'root' }}
+      RABBITMQ_PASSWORD: ${{ inputs.rabbitmq_password || secrets.RABBITMQ_PASSWORD }}
+      RABBITMQ_BIND_ADDRESS: ${{ inputs.rabbitmq_bind_address || vars.RABBITMQ_BIND_ADDRESS || '127.0.0.1' }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check the values
+        run: |
+          # keep typed passwords out of the logs
+          for v in MYSQL_ROOT_PASSWORD REDIS_PASSWORD RABBITMQ_PASSWORD; do [ -n "${!v}" ] && echo "::add-mask::${!v}"; done
+          [ -n "$HOST" ] || { echo "::error::Give the server's IP address (input server_host, or the SERVER_HOST secret)."; exit 1; }
+          for v in MYSQL_ROOT_PASSWORD REDIS_PASSWORD RABBITMQ_PASSWORD; do [ -n "${!v}" ] || { echo "::error::$v is empty: type it as an input or add it as a secret of the '${{ github.ref_name }}' environment."; exit 1; }; done
+          [[ "$HOST$USER$PORT" =~ ^[A-Za-z0-9._@:-]+$ ]] || { echo "::error::The host, user or port has unexpected characters."; exit 1; }
+          [[ "$DEPLOY_ROOT" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "::error::The folder must be an absolute path without spaces."; exit 1; }
 
       - name: Configure SSH key
         env:
           SECRET_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: bash scripts/configure-ssh-key.sh
 
+      - name: Render the settings
+        run: python3 scripts/render_env.py
+
       - name: Prepare the server
-        if: inputs.mode == 'install'
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
           scp -i "$HOME/.ssh/deploy_key" -P "$PORT" -o StrictHostKeyChecking=accept-new scripts/bootstrap-server.sh "$USER@$HOST:/tmp/bootstrap-server.sh"
           $SSH "$USER@$HOST" "DEPLOY_ROOT='$DEPLOY_ROOT' bash /tmp/bootstrap-server.sh"
 
-      - name: Render the settings
-        if: inputs.mode == 'install'
-        env:
-          ALL_SECRETS: ${{ toJSON(secrets) }}
-        run: python3 scripts/render_env.py
-
-      - name: Render the certificates
-        env:
-          ALL_SECRETS: ${{ toJSON(secrets) }}
-          DOMAINS_INPUT: ${{ inputs.domains }}
-        run: python3 scripts/render_certs.py
-
-      - name: Check the certificates
-        run: |
-          # each must be valid for a while, belong to its key and be a wildcard for its domain (*.domain)
-          for dir in infra/certs/*/; do
-            base="$(basename "$dir")"; f="$dir/fullchain.pem"
-            echo "== $base"
-            openssl x509 -in "$f" -noout -subject -enddate
-            openssl x509 -in "$f" -noout -checkend 1209600 || { echo "::error::The certificate for $base expires within 14 days (or already has). Install a new one with leezify_env/scripts/set-tls.sh."; exit 1; }
-            [ "$(openssl x509 -in "$f" -noout -pubkey | openssl sha256)" = "$(openssl pkey -in "$dir/privkey.pem" -pubout | openssl sha256)" ] || { echo "::error::The private key does not belong to the certificate for $base."; exit 1; }
-            names="$(openssl x509 -in "$f" -noout -text | awk '/Subject Alternative Name/ {getline; print}' | tr ',' '\n' | sed -n 's/.*DNS:[[:space:]]*//p' | tr -d ' ' || true)"
-            echo "$names" | grep -qx "\*.$base" || { echo "::error::The certificate for $base must be a wildcard (*.$base)."; exit 1; }
-          done
-
-      - name: Make sure the shared services are there
-        if: inputs.mode == 'certificates'
-        run: |
-          SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
-          $SSH "$USER@$HOST" "docker ps --format '{{.Names}}' | grep -qx nginx" || { echo "::error::nginx is not running on the server. Run this workflow once with mode = install."; exit 1; }
-
       - name: Upload
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
           $SSH "$USER@$HOST" "mkdir -p '$DEPLOY_ROOT/infra/nginx/sites' '$DEPLOY_ROOT/infra/certs'"
-          if [ "$MODE" = install ]; then
-            # the host files written by nginx-route (sites/) and the certificates are never deleted by a sync
-            rsync -az --delete --exclude 'nginx/sites/' --exclude 'certs/' --exclude '.nginx-route.lock' -e "$SSH" infra/ "$USER@$HOST:$DEPLOY_ROOT/infra/"
-            sed "s|__INFRA_DIR__|$DEPLOY_ROOT/infra|" scripts/nginx-route.sh | $SSH "$USER@$HOST" "cat > /usr/local/bin/nginx-route && chmod 755 /usr/local/bin/nginx-route"
-          fi
-          rsync -az --exclude '.gitkeep' -e "$SSH" infra/certs/ "$USER@$HOST:$DEPLOY_ROOT/infra/certs/"
+          # the host files and certificates put there by the services' deploys (nginx-route) are never deleted by a sync
+          rsync -az --delete --exclude 'nginx/sites/' --exclude 'certs/' --exclude '.nginx-route.lock' -e "$SSH" infra/ "$USER@$HOST:$DEPLOY_ROOT/infra/"
+          sed "s|__INFRA_DIR__|$DEPLOY_ROOT/infra|" scripts/nginx-route.sh | $SSH "$USER@$HOST" "cat > /usr/local/bin/nginx-route && chmod 755 /usr/local/bin/nginx-route"
 
       - name: Start the shared services
-        if: inputs.mode == 'install'
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
           $SSH "$USER@$HOST" bash -s <<REMOTE
@@ -98,14 +117,6 @@ jobs:
             docker network inspect public >/dev/null 2>&1 || docker network create public
             docker compose pull
             docker compose up -d --remove-orphans
-          REMOTE
-
-      - name: Test and reload nginx
-        run: |
-          SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
-          $SSH "$USER@$HOST" bash -s <<REMOTE
-            set -euo pipefail
-            cd '$DEPLOY_ROOT/infra'
             docker compose exec -T nginx nginx -t
             docker compose exec -T nginx nginx -s reload
             echo "Hosts served now:"; nginx-route list || true

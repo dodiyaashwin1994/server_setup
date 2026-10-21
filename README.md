@@ -1,41 +1,41 @@
-# leezify_server_setup
+# server_setup
 
-The shared part of a server that hosts several apps: the **nginx edge** (HTTPS, certificates from Hostinger), **MySQL**, **Redis** and **RabbitMQ**. MySQL, Redis and RabbitMQ listen on the server itself only (127.0.0.1); apps reach them over the docker network `public`. The firewall opens SSH, HTTP and HTTPS only.
-
-This repo knows **no app**. Each app publishes its own address when it is deployed, with the `nginx-route` command this setup installs on the server.
+The shared part of a server that hosts several apps: the **nginx edge**, **MySQL**, **Redis** and **RabbitMQ**, plus the generic `nginx-route` command. It knows no app and no certificate: each service publishes its own address, **and brings its own certificate**, when it is deployed.
 
 ## 1. Install (once per server): *Actions -> Setup infrastructure -> Run workflow*
 
 | Input | Meaning |
 |---|---|
-| `mode = install` | Docker, firewall, nginx, MySQL, Redis, RabbitMQ, the certificates and `nginx-route`. Safe to run again (a password or setting changed); the host files apps have published are kept. |
-| `mode = certificates` | Only installs or renews certificates and reloads nginx. |
-| `domains` | Other domains to install a certificate for, besides `SERVICE_DOMAIN` (comma separated). |
+| `server_host` | IP address of the server to set up (or the `SERVER_HOST` secret). |
+| `ssh_user`, `ssh_port`, `deploy_root` | `root`, `22`, `/opt/leezify` by default. |
+| `mysql_root_password` | MySQL root password. |
+| `redis_password` | Redis password. |
+| `rabbitmq_username`, `rabbitmq_password` | RabbitMQ login. |
+| `*_bind_address` | Address the published port of MySQL / Redis / RabbitMQ listens on. **Leave `127.0.0.1`** (see below). |
 
-The branch picks the GitHub environment (`main`, `dev`, `uat`); its secrets come from `leezify_env/leezify_server_setup/<env>.env`. dev and uat run on main's server: do not run *install* for them.
+Every value can instead be a secret of the GitHub environment (`SERVER_HOST`, `MYSQL_ROOT_PASSWORD`, `REDIS_PASSWORD`, `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD`; the SSH key is always the secret `SSH_PRIVATE_KEY`); what is typed wins. **Prefer secrets for passwords**: a typed input stays visible to everyone who can read this repository's workflow runs (the workflow masks it in the logs only). The branch (`main`, `dev`, `uat`) picks the environment whose secrets are used. dev and uat run on main's server: do not run this for them.
+
+It prepares Docker and a firewall (SSH, 80, 443), starts the four services, installs `nginx-route`, and is safe to run again (a password or setting changed). The host files and certificates the services have put on the server are kept.
+
+The passwords you give here must be the ones the services use: `DB_PASSWORD`, `REDIS_PASSWORD`, `RABBITMQ_PASSWORD` of the service env files.
+
+### Do you need a bind address?
+No. The apps reach MySQL, Redis and RabbitMQ through the docker network (`mysql`, `redis`, `rabbitmq`), which does not use the published ports at all. The published ports exist only for tools on the server itself (or an SSH tunnel, e.g. `ssh -L 3306:127.0.0.1:3306`), so `127.0.0.1` is right. Binding to `0.0.0.0` or the public IP puts the database on the internet: docker publishes ports around `ufw`, so the firewall does **not** protect it. Use it only for a private network address and with a firewall in front. The RabbitMQ management page (15672) is always local.
 
 ## 2. Each app publishes itself: `nginx-route`
 
 ```bash
-nginx-route add    --host app.ailease.tech --target ui-user:80 [--cert-domain ailease.tech] [--max-body 15m]
-nginx-route remove --host app.ailease.tech
+nginx-route add    --host app.example.com --target ui-user:80 [--cert FILE --key FILE] [--cert-domain example.com] [--max-body 15m] [--deny /internal,/admin]
+nginx-route remove --host app.example.com
 nginx-route list
 ```
 
-- The app's deploy workflow runs it over SSH after `docker compose up`. Its inputs are the **domain**, **subdomain** and **port**; the container is the app's alias on the network `public`.
-- One file per host (`infra/nginx/sites/<host>.conf` on the server): the routes of other apps are never touched, and two apps deploying at the same time wait for each other (lock).
-- nginx is tested before it reloads; if it rejects the change the previous file is put back and the command fails (the deploy fails with it).
-- The container does not have to be running when the route is added.
-- A route needs a certificate on the server for the host's parent domain (`app.ailease.tech` -> `ailease.tech`) or for the host itself. Without one the command says so and changes nothing.
+- The app's deploy workflow runs it over SSH after `docker compose up`. Inputs: domain, subdomain, port; the container is the app's alias on the network `public`.
+- **Certificates come with the service**: its env holds `TLS_CERT_PEM_BASE64` / `TLS_KEY_PEM_BASE64`; the deploy uploads them and `nginx-route` checks them (not expired, matches the key, covers the host) and installs them in `certs/<domain>/` (the host's parent when the certificate is a wildcard for it, else the host itself), keeping a copy only on the server. Without a certificate in the env, the one already installed for that domain is used; if there is none the deploy fails and says so. If nginx rejects the result, the previous host file and certificate are put back.
+- One file per host (`nginx/sites/<host>.conf`): other apps' routes are never touched; two apps deploying at once wait for each other (lock). The container does not have to be running when its route is added.
 
-## Certificates
-- Hostinger's **wildcard** certificate for `*.<domain>` (it must also list `<domain>`), with the private key kept from when the CSR was made. Renewal is manual: the workflow refuses a certificate that expires within 14 days, does not match its key, or is not a wildcard.
-- `bash leezify_env/scripts/set-tls.sh <env> <cert> <key> [ca-bundle] [domain]` stores it in the env repo (leave `domain` out for `SERVICE_DOMAIN`), `push-secrets.sh` loads it into GitHub, then run this workflow (`certificates` is enough to renew).
-- On the server: `infra/certs/<domain>/{fullchain,privkey}.pem`.
-- A new domain: install its certificate first (`domains` input), then deploy the app with that domain.
-
-## DNS (Hostinger DNS zone of each domain)
-`A @` and `A *` to the server's IP; leave the mail records as they are.
+## DNS (the domain's DNS zone)
+`A @` and `A *` to the server's IP; leave the mail records as they are. A host under another domain needs its own `A` records there and its own certificate in that service's env.
 
 ## Conventions for many apps
 - One container per service, named for what it is (`auth`, `lease`, `billing`; `-dev` / `-uat` for the other environments), on the network `public`.

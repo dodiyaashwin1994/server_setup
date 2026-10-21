@@ -1,7 +1,8 @@
 name: leezify-infra
 
-# Shared services of the server: the nginx edge (HTTPS, one site file per host name, certificates from Hostinger), MySQL, Redis and RabbitMQ.
-# MySQL, Redis and RabbitMQ listen on this machine only (127.0.0.1); the applications reach them over the docker network `public`.
+# Shared services of the server: the nginx edge (HTTPS, one site file per host name; the certificates are put there by each service's deploy), MySQL, Redis and RabbitMQ.
+# Applications reach MySQL, Redis and RabbitMQ over the docker network `public`. The published ports below are for tools on the server (or an SSH tunnel): they listen on 127.0.0.1
+# unless the Setup infrastructure workflow was given another bind address. NOTE: a published port is open to whoever can reach that address, ufw does not filter it (docker bypasses it).
 services:
   nginx:
     image: nginx:1.27-alpine
@@ -33,7 +34,7 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
     ports:
-      - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
+      - "${MYSQL_BIND_ADDRESS:-127.0.0.1}:${MYSQL_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./mysql/initdb:/docker-entrypoint-initdb.d:ro
@@ -60,7 +61,7 @@ services:
       - --maxmemory-policy
       - ${REDIS_MAXMEMORY_POLICY:-allkeys-lru}
     ports:
-      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+      - "${REDIS_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     networks:
@@ -75,10 +76,9 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
-      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE}
     ports:
-      - "127.0.0.1:5672:5672"
-      - "127.0.0.1:15672:15672"
+      - "${RABBITMQ_BIND_ADDRESS:-127.0.0.1}:5672:5672"
+      - "127.0.0.1:15672:15672"            # the management page: this machine only
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     networks:
