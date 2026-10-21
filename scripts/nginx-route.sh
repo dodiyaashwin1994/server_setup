@@ -2,12 +2,13 @@
 # nginx-route: publishes a container under a host name on this server's nginx edge. Installed as /usr/local/bin/nginx-route by the Setup infrastructure workflow.
 # Any app can call it from its own deploy (over SSH); one file per host name is kept, so routes of other apps are never touched.
 #
-#   nginx-route add    --host app.example.com --target container:port [--cert-domain example.com] [--max-body 15m]
+#   nginx-route add    --host app.example.com --target container:port [--cert-domain example.com] [--max-body 15m] [--deny /internal,/admin]
 #   nginx-route remove --host app.example.com
 #   nginx-route list
 #
 # The container must be on the docker network `public` (it does not have to be running yet: the name is looked up when a request arrives).
 # The certificate is the wildcard of the host's parent domain (app.example.com -> certs/example.com/), or of the host itself; --cert-domain names another one.
+# --deny lists path prefixes the internet must not reach (they answer 404 at the edge; containers on the docker network still reach them directly).
 # nginx is tested before it reloads; when it rejects the change the previous state is put back and the command fails.
 set -euo pipefail
 INFRA_DIR="${NGINX_ROUTE_INFRA:-__INFRA_DIR__}"
@@ -15,16 +16,17 @@ NGINX="${NGINX_ROUTE_NGINX:-docker exec nginx nginx}"
 SITES="$INFRA_DIR/nginx/sites"; CERTS="$INFRA_DIR/certs"; TEMPLATE="$INFRA_DIR/nginx/site.conf.template"
 
 die() { echo "nginx-route: $*" >&2; exit 1; }
-usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 cmd="${1:-}"; [ -n "$cmd" ] || usage; shift
-host=""; target=""; cert_domain=""; max_body="15m"
+host=""; target=""; cert_domain=""; max_body="15m"; deny=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --host) host="${2:-}"; shift 2 ;;
     --target) target="${2:-}"; shift 2 ;;
     --cert-domain) cert_domain="${2:-}"; shift 2 ;;
     --max-body) max_body="${2:-}"; shift 2 ;;
+    --deny) deny="${2:-}"; shift 2 ;;
     *) die "unknown option $1" ;;
   esac
 done
@@ -62,10 +64,17 @@ case "$cmd" in
     if [ ! -f "$CERTS/$base/fullchain.pem" ] || [ ! -f "$CERTS/$base/privkey.pem" ]; then
       die "no certificate for $base on this server (installed: $(ls "$CERTS" 2>/dev/null | tr '\n' ' ')). Install it with the Setup infrastructure workflow first."
     fi
+    deny_conf=""
+    if [ -n "$deny" ]; then
+      [[ "$deny" =~ ^/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*(,/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*)*$ ]] || die "--deny must look like /internal,/admin"
+      alt="$(printf '%s' "$deny" | sed 's|^/||; s|,/|\||g')"
+      deny_conf="    location ~ ^/($alt)(/|\$) { return 404; }"
+    fi
     [ -f "$TEMPLATE" ] || die "$TEMPLATE is missing: run the Setup infrastructure workflow"
     backup="$(mktemp)"; trap 'rm -f "$backup"' EXIT
     [ -f "$SITES/$host.conf" ] && cp "$SITES/$host.conf" "$backup" || : > "$backup"
-    sed -e "s|__HOST__|$host|g" -e "s|__UPSTREAM__|$target|g" -e "s|__BASE__|$base|g" -e "s|__MAX_BODY__|$max_body|g" "$TEMPLATE" > "$SITES/$host.conf.new"
+    sed -e "s|__HOST__|$host|g" -e "s|__UPSTREAM__|$target|g" -e "s|__BASE__|$base|g" -e "s|__MAX_BODY__|$max_body|g" "$TEMPLATE" \
+      | awk -v d="$deny_conf" '/__DENY__/ { if (d != "") print d; next } { print }' > "$SITES/$host.conf.new"
     mv "$SITES/$host.conf.new" "$SITES/$host.conf"
     apply "$backup"
     echo "nginx-route: $host -> $target (certificate of $base)"
