@@ -1,4 +1,4 @@
-name: leezify-infra
+name: infra
 
 # Shared services of the server: the nginx edge (HTTPS, one site file per host name; the certificates are put there by each service's deploy), MySQL, Redis and RabbitMQ.
 # Applications reach MySQL, Redis and RabbitMQ over the docker network `public`. The published ports below are for tools on the server (or an SSH tunnel): they listen on 127.0.0.1

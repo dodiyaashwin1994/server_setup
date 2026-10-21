@@ -1,7 +1,7 @@
 name: Setup infrastructure
 
 # Installs the shared part of a server, once: Docker, a firewall that opens SSH / HTTP / HTTPS, the nginx edge, MySQL, Redis and RabbitMQ, and the `nginx-route` command.
-# Run it for a new server, or again to change a password or a bind address (the host files and certificates the services have put on the server are kept; MySQL's root password is only set on the very first start, see the README).
+# Run it for a new server, or again to change a password or a bind address (the host files and certificates the services have put on the server are kept; the services of your applications are not touched; MySQL's root password is only set on the very first start, see the README).
 # Each service then publishes its own address AND brings its own certificate when it is deployed (see its deploy workflow); this workflow knows no app and no certificate.
 #
 # Every value can be typed here or kept as a secret of the GitHub environment (the branch picks it: main, dev, uat); what is typed wins.
@@ -21,10 +21,10 @@ on:
         description: SSH port
         type: string
         default: "22"
-      deploy_root:
-        description: Folder on the server
+      infra_root:
+        description: Folder of the shared services on the server (the services of the applications go to /opt/saas, see their deploy workflows)
         type: string
-        default: /opt/leezify
+        default: /opt/infra
       mysql_username:
         description: "MySQL user the services log in with (root, or another user that is created with every privilege)"
         type: string
@@ -78,7 +78,7 @@ jobs:
       HOST: ${{ inputs.server_host || secrets.SERVER_HOST }}
       USER: ${{ inputs.ssh_user || secrets.SERVER_USER || 'root' }}
       PORT: ${{ inputs.ssh_port || secrets.SERVER_PORT || '22' }}
-      DEPLOY_ROOT: ${{ inputs.deploy_root || secrets.DEPLOY_ROOT || '/opt/leezify' }}
+      INFRA_ROOT: ${{ inputs.infra_root || secrets.INFRA_ROOT || '/opt/infra' }}
       MYSQL_USERNAME: ${{ inputs.mysql_username || secrets.MYSQL_USERNAME || 'root' }}
       MYSQL_PASSWORD: ${{ inputs.mysql_password || secrets.MYSQL_PASSWORD || secrets.MYSQL_ROOT_PASSWORD }}
       MYSQL_BIND_ADDRESS: ${{ inputs.mysql_bind_address || vars.MYSQL_BIND_ADDRESS || '127.0.0.1' }}
@@ -104,7 +104,9 @@ jobs:
           [ -z "$RABBITMQ_DOMAIN" ] || [[ "$RABBITMQ_DOMAIN" =~ ^([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]] || { echo "::error::The RabbitMQ domain is not a host name (e.g. rabbitmq.example.com)."; exit 1; }
           [[ "$RABBITMQ_ALLOWED_IPS" =~ ^[0-9A-Fa-f:./,]*$ ]] || { echo "::error::The allowed addresses must be IPs or networks separated by commas."; exit 1; }
           [[ "$HOST$USER$PORT" =~ ^[A-Za-z0-9._@:-]+$ ]] || { echo "::error::The host, user or port has unexpected characters."; exit 1; }
-          [[ "$DEPLOY_ROOT" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "::error::The folder must be an absolute path without spaces."; exit 1; }
+          # this folder is synced with --delete: it must be a folder of its own, two levels deep at least (/opt/infra), never a system folder
+          [[ "$INFRA_ROOT" =~ ^/[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+$ ]] || { echo "::error::The infra folder must be an absolute path without spaces, at least two levels deep (e.g. /opt/infra)."; exit 1; }
+          case "$INFRA_ROOT" in /usr/*|/etc/*|/var/*|/bin/*|/sbin/*|/lib*|/boot/*|/root/*|/home|/home/) echo "::error::$INFRA_ROOT is a system folder: use a folder of its own such as /opt/infra."; exit 1 ;; esac
 
       - name: Configure SSH key
         env:
@@ -118,22 +120,22 @@ jobs:
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
           scp -i "$HOME/.ssh/deploy_key" -P "$PORT" -o StrictHostKeyChecking=accept-new scripts/bootstrap-server.sh "$USER@$HOST:/tmp/bootstrap-server.sh"
-          $SSH "$USER@$HOST" "DEPLOY_ROOT='$DEPLOY_ROOT' bash /tmp/bootstrap-server.sh"
+          $SSH "$USER@$HOST" "INFRA_ROOT='$INFRA_ROOT' bash /tmp/bootstrap-server.sh"
 
       - name: Upload
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
-          $SSH "$USER@$HOST" "mkdir -p '$DEPLOY_ROOT/infra/nginx/sites' '$DEPLOY_ROOT/infra/certs'"
+          $SSH "$USER@$HOST" "mkdir -p '$INFRA_ROOT/nginx/sites' '$INFRA_ROOT/certs'"
           # the host files and certificates put there by the services' deploys (nginx-route) are never deleted by a sync
-          rsync -az --delete --exclude 'nginx/sites/' --exclude 'certs/' --exclude '.nginx-route.lock' -e "$SSH" infra/ "$USER@$HOST:$DEPLOY_ROOT/infra/"
-          sed "s|__INFRA_DIR__|$DEPLOY_ROOT/infra|" scripts/nginx-route.sh | $SSH "$USER@$HOST" "cat > /usr/local/bin/nginx-route && chmod 755 /usr/local/bin/nginx-route"
+          rsync -az --delete --exclude 'nginx/sites/' --exclude 'certs/' --exclude '.nginx-route.lock' -e "$SSH" infra/ "$USER@$HOST:$INFRA_ROOT/"
+          sed "s|__INFRA_DIR__|$INFRA_ROOT|" scripts/nginx-route.sh | $SSH "$USER@$HOST" "cat > /usr/local/bin/nginx-route && chmod 755 /usr/local/bin/nginx-route"
 
       - name: Start the shared services
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
           $SSH "$USER@$HOST" bash -s <<REMOTE
             set -euo pipefail
-            cd '$DEPLOY_ROOT/infra'
+            cd '$INFRA_ROOT'
             docker network inspect public >/dev/null 2>&1 || docker network create public
             docker compose pull
             docker compose up -d --remove-orphans

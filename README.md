@@ -2,12 +2,16 @@
 
 The shared part of a server that hosts several apps: the **nginx edge**, **MySQL**, **Redis** and **RabbitMQ**, plus the generic `nginx-route` command. It knows no app and no certificate: each service publishes its own address, **and brings its own certificate**, when it is deployed.
 
+## Folders on the server
+- `/opt/infra`: this repository's services (nginx, MySQL, Redis, RabbitMQ: `docker-compose.yml`, `.env`, `nginx/`, `certs/`, `mysql/`). Synced by this workflow with `--delete`, so keep nothing of your own in it except what the services put there (`nginx/sites/`, `certs/`).
+- `/opt/saas`: the application services (backend, frontend), one folder each, e.g. `/opt/saas/leezify_lease-main`. Their deploy workflows manage them.
+
 ## 1. Install (once per server): *Actions -> Setup infrastructure -> Run workflow*
 
 | Input | Meaning |
 |---|---|
 | `server_host` | IP address of the server to set up (or the `SERVER_HOST` secret). |
-| `ssh_user`, `ssh_port`, `deploy_root` | `root`, `22`, `/opt/leezify` by default. |
+| `ssh_user`, `ssh_port`, `infra_root` | `root`, `22`, `/opt/infra` by default. |
 | `mysql_username` | The MySQL user the services log in with: `root` (default), or another name, which is created with every privilege (the lease service creates a database per account). |
 | `mysql_password` | That user's password (also root's). |
 | `redis_password` | Redis password. |
