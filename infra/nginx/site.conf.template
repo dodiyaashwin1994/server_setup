@@ -7,6 +7,7 @@ server {
     ssl_certificate_key /etc/nginx/certs/__BASE__/privkey.pem;
     include snippets/ssl.conf;
     client_max_body_size __MAX_BODY__;
+    __ALLOW__
     __DENY__
     location / {
         set $upstream http://__UPSTREAM__;

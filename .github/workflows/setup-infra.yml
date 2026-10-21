@@ -57,6 +57,14 @@ on:
         description: "Address RabbitMQ's published port listens on (127.0.0.1 = this machine only)"
         type: string
         default: 127.0.0.1
+      rabbitmq_domain:
+        description: "Host name of the RabbitMQ management page, e.g. rabbitmq.example.com (empty = not published). Needs a certificate: see the README"
+        type: string
+        required: false
+      rabbitmq_allowed_ips:
+        description: "Addresses allowed to open that page, comma separated, e.g. 203.0.113.0/24,198.51.100.7 (empty = everyone who knows the login)"
+        type: string
+        required: false
 
 concurrency:
   group: infra-${{ github.ref_name }}
@@ -79,6 +87,10 @@ jobs:
       RABBITMQ_USERNAME: ${{ inputs.rabbitmq_username || secrets.RABBITMQ_USERNAME || 'root' }}
       RABBITMQ_PASSWORD: ${{ inputs.rabbitmq_password || secrets.RABBITMQ_PASSWORD }}
       RABBITMQ_BIND_ADDRESS: ${{ inputs.rabbitmq_bind_address || vars.RABBITMQ_BIND_ADDRESS || '127.0.0.1' }}
+      RABBITMQ_DOMAIN: ${{ inputs.rabbitmq_domain || secrets.RABBITMQ_DOMAIN || vars.RABBITMQ_DOMAIN }}
+      RABBITMQ_ALLOWED_IPS: ${{ inputs.rabbitmq_allowed_ips || vars.RABBITMQ_ALLOWED_IPS }}
+      TLS_CERT_PEM_BASE64: ${{ secrets.TLS_CERT_PEM_BASE64 }}      # optional: the certificate of the RabbitMQ page (else one already installed for its domain, e.g. by a service, is used)
+      TLS_KEY_PEM_BASE64: ${{ secrets.TLS_KEY_PEM_BASE64 }}
     steps:
       - uses: actions/checkout@v4
 
@@ -89,6 +101,8 @@ jobs:
           [ -n "$HOST" ] || { echo "::error::Give the server's IP address (input server_host, or the SERVER_HOST secret)."; exit 1; }
           for v in MYSQL_PASSWORD REDIS_PASSWORD RABBITMQ_PASSWORD; do [ -n "${!v}" ] || { echo "::error::$v is empty: type it as an input or add it as a secret of the '${{ github.ref_name }}' environment."; exit 1; }; done
           [[ "$MYSQL_USERNAME" =~ ^[A-Za-z0-9_]{1,32}$ ]] || { echo "::error::The MySQL user must be letters, digits and _ (at most 32)."; exit 1; }
+          [ -z "$RABBITMQ_DOMAIN" ] || [[ "$RABBITMQ_DOMAIN" =~ ^([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]] || { echo "::error::The RabbitMQ domain is not a host name (e.g. rabbitmq.example.com)."; exit 1; }
+          [[ "$RABBITMQ_ALLOWED_IPS" =~ ^[0-9A-Fa-f:./,]*$ ]] || { echo "::error::The allowed addresses must be IPs or networks separated by commas."; exit 1; }
           [[ "$HOST$USER$PORT" =~ ^[A-Za-z0-9._@:-]+$ ]] || { echo "::error::The host, user or port has unexpected characters."; exit 1; }
           [[ "$DEPLOY_ROOT" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "::error::The folder must be an absolute path without spaces."; exit 1; }
 
@@ -132,3 +146,25 @@ jobs:
             echo "Hosts served now:"; nginx-route list || true
             docker compose ps
           REMOTE
+
+      - name: Publish the RabbitMQ management page
+        if: env.RABBITMQ_DOMAIN != ''
+        run: |
+          SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
+          CERT_ARGS=""; REMOTE_TMP=""
+          if [ -n "$TLS_CERT_PEM_BASE64" ] && [ -n "$TLS_KEY_PEM_BASE64" ]; then
+            REMOTE_TMP="/tmp/route-$GITHUB_RUN_ID-$RANDOM"
+            umask 077
+            printf '%s' "$TLS_CERT_PEM_BASE64" | base64 -d > "$RUNNER_TEMP/fullchain.pem"
+            printf '%s' "$TLS_KEY_PEM_BASE64" | base64 -d > "$RUNNER_TEMP/privkey.pem"
+            $SSH "$USER@$HOST" "umask 077 && mkdir -p $REMOTE_TMP"
+            scp -i "$HOME/.ssh/deploy_key" -P "$PORT" -o StrictHostKeyChecking=accept-new "$RUNNER_TEMP/fullchain.pem" "$RUNNER_TEMP/privkey.pem" "$USER@$HOST:$REMOTE_TMP/"
+            rm -f "$RUNNER_TEMP/fullchain.pem" "$RUNNER_TEMP/privkey.pem"
+            CERT_ARGS="--cert $REMOTE_TMP/fullchain.pem --key $REMOTE_TMP/privkey.pem"
+          fi
+          ALLOW_ARGS=""; [ -z "$RABBITMQ_ALLOWED_IPS" ] || ALLOW_ARGS="--allow $RABBITMQ_ALLOWED_IPS"
+          # the services and MySQL / Redis / RabbitMQ are installed at this point; only the page is missing, so a missing certificate is a warning, not a failure
+          if ! $SSH "$USER@$HOST" "nginx-route add --host $RABBITMQ_DOMAIN --target rabbitmq:15672 $ALLOW_ARGS $CERT_ARGS; rc=\$?; [ -z '$REMOTE_TMP' ] || rm -rf '$REMOTE_TMP'; exit \$rc"; then
+            echo "::warning::The RabbitMQ page https://$RABBITMQ_DOMAIN was not published (see the message above, usually: no certificate for its domain yet). Add the TLS_CERT_PEM_BASE64 / TLS_KEY_PEM_BASE64 secrets and run again, or deploy a service of that domain first."
+          fi
+          [ -n "$ALLOW_ARGS" ] || echo "::notice::The RabbitMQ page is open to every address; only the RabbitMQ login protects it. Consider rabbitmq_allowed_ips."

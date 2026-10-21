@@ -2,7 +2,7 @@
 # nginx-route: publishes a container under a host name on this server's nginx edge. Installed as /usr/local/bin/nginx-route by the Setup infrastructure workflow.
 # Any app can call it from its own deploy (over SSH); one file per host name is kept, so routes of other apps are never touched.
 #
-#   nginx-route add    --host app.example.com --target container:port [--cert FILE --key FILE] [--cert-domain example.com] [--max-body 15m] [--deny /internal,/admin]
+#   nginx-route add    --host app.example.com --target container:port [--cert FILE --key FILE] [--cert-domain example.com] [--max-body 15m] [--deny /internal,/admin] [--allow 203.0.113.0/24,198.51.100.7]
 #   nginx-route remove --host app.example.com
 #   nginx-route list
 #
@@ -11,6 +11,7 @@
 # certs/<domain>/, where <domain> is the host's parent (app.example.com -> example.com) when the certificate is a wildcard for it, else the host itself. Without --cert the one already
 # installed for that domain is used (--cert-domain names another one).
 # --deny lists path prefixes the internet must not reach (they answer 404 at the edge; containers on the docker network still reach them directly).
+# --allow lists the addresses (IPv4 / IPv6, with or without /mask) that may use this host; everyone else gets 403. Without it the host is open to everyone.
 # nginx is tested before it reloads; when it rejects the change the previous state is put back and the command fails.
 set -euo pipefail
 INFRA_DIR="${NGINX_ROUTE_INFRA:-__INFRA_DIR__}"
@@ -18,10 +19,10 @@ NGINX="${NGINX_ROUTE_NGINX:-docker exec nginx nginx}"
 SITES="$INFRA_DIR/nginx/sites"; CERTS="$INFRA_DIR/certs"; TEMPLATE="$INFRA_DIR/nginx/site.conf.template"
 
 die() { echo "nginx-route: $*" >&2; exit 1; }
-usage() { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 cmd="${1:-}"; [ -n "$cmd" ] || usage; shift
-host=""; target=""; cert_domain=""; max_body="15m"; deny=""; cert_file=""; key_file=""
+host=""; target=""; cert_domain=""; max_body="15m"; deny=""; cert_file=""; key_file=""; allow=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --host) host="${2:-}"; shift 2 ;;
@@ -29,6 +30,7 @@ while [ $# -gt 0 ]; do
     --cert-domain) cert_domain="${2:-}"; shift 2 ;;
     --max-body) max_body="${2:-}"; shift 2 ;;
     --deny) deny="${2:-}"; shift 2 ;;
+    --allow) allow="${2:-}"; shift 2 ;;
     --cert) cert_file="${2:-}"; shift 2 ;;
     --key) key_file="${2:-}"; shift 2 ;;
     *) die "unknown option $1" ;;
@@ -98,6 +100,15 @@ case "$cmd" in
       alt="$(printf '%s' "$deny" | sed 's|^/||; s|,/|\||g')"
       deny_conf="    location ~ ^/($alt)(/|\$) { return 404; }"
     fi
+    allow_conf=""
+    if [ -n "$allow" ]; then
+      IFS=',' read -ra addrs <<< "$allow"
+      for a in "${addrs[@]}"; do
+        [[ "$a" =~ ^[0-9a-fA-F:.]+(/[0-9]{1,3})?$ ]] || die "--allow: \"$a\" is not an IP address or network"
+        allow_conf+="    allow $a;"$'\n'
+      done
+      allow_conf+="    deny all;"
+    fi
     [ -f "$TEMPLATE" ] || die "$TEMPLATE is missing: run the Setup infrastructure workflow"
     backup="$(mktemp)"; CERT_BACKUP="$(mktemp -d)"; trap 'rm -rf "$backup" "$CERT_BACKUP"' EXIT
     [ -f "$SITES/$host.conf" ] && cp "$SITES/$host.conf" "$backup" || : > "$backup"
@@ -107,7 +118,7 @@ case "$cmd" in
       cp "$cert_file" "$CERTS/$base/fullchain.pem"; cp "$key_file" "$CERTS/$base/privkey.pem"; chmod 600 "$CERTS/$base/privkey.pem"
     fi
     sed -e "s|__HOST__|$host|g" -e "s|__UPSTREAM__|$target|g" -e "s|__BASE__|$base|g" -e "s|__MAX_BODY__|$max_body|g" "$TEMPLATE" \
-      | awk -v d="$deny_conf" '/__DENY__/ { if (d != "") print d; next } { print }' > "$SITES/$host.conf.new"
+      | DENY_CONF="$deny_conf" ALLOW_CONF="$allow_conf" awk '/__ALLOW__/ { if (ENVIRON["ALLOW_CONF"] != "") print ENVIRON["ALLOW_CONF"]; next } /__DENY__/ { if (ENVIRON["DENY_CONF"] != "") print ENVIRON["DENY_CONF"]; next } { print }' > "$SITES/$host.conf.new"
     mv "$SITES/$host.conf.new" "$SITES/$host.conf"
     apply "$backup"
     echo "nginx-route: $host -> $target (certificate of $base$([ -n "$cert_file" ] && echo ", installed now"))"
