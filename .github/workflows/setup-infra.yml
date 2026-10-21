@@ -3,16 +3,17 @@ name: Setup infrastructure
 # Installs the shared part of a server, once: Docker, a firewall that opens SSH / HTTP / HTTPS, the nginx edge, MySQL, Redis and RabbitMQ, and the `nginx-route` command.
 # Run it for a new server, or again to change a password or a bind address (the host files and certificates the services have put on the server are kept; the services of your applications are not touched; MySQL's root password is only set on the very first start, see the README).
 # Each service then publishes its own address AND brings its own certificate when it is deployed (see its deploy workflow); this workflow knows no app and no certificate.
+
 #
-# Every value can be typed here or kept as a secret of the GitHub environment (the branch picks it: main, dev, uat); what is typed wins.
-# Prefer secrets for the passwords: a typed input is visible to everyone who can read this repository's workflow runs.
+# Everything is asked here, as inputs of the run: nothing is read from secrets or variables of this repository, except the SSH private key (the secret SSH_PRIVATE_KEY of the
+# environment; the branch picks it: main, dev, uat). The typed passwords are masked in the logs, but stay visible in the run's inputs to everyone who can read this repository's runs.
 on:
   workflow_dispatch:
     inputs:
       server_host:
         description: IP address (or host name) of the server to set up
         type: string
-        required: false
+        required: true
       ssh_user:
         description: SSH user
         type: string
@@ -32,7 +33,7 @@ on:
       mysql_password:
         description: MySQL password of that user (also the password of root)
         type: string
-        required: false
+        required: true
       mysql_bind_address:
         description: "Address MySQL's published port listens on. Not needed: 127.0.0.1 (this machine only) is enough, apps use the docker network"
         type: string
@@ -40,7 +41,7 @@ on:
       redis_password:
         description: Redis password
         type: string
-        required: false
+        required: true
       redis_bind_address:
         description: "Address Redis's published port listens on (127.0.0.1 = this machine only)"
         type: string
@@ -52,7 +53,7 @@ on:
       rabbitmq_password:
         description: RabbitMQ password
         type: string
-        required: false
+        required: true
       rabbitmq_bind_address:
         description: "Address RabbitMQ's published port listens on (127.0.0.1 = this machine only)"
         type: string
@@ -75,22 +76,20 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name }}
     env:
-      HOST: ${{ inputs.server_host || secrets.SERVER_HOST }}
-      USER: ${{ inputs.ssh_user || secrets.SERVER_USER || 'root' }}
-      PORT: ${{ inputs.ssh_port || secrets.SERVER_PORT || '22' }}
-      INFRA_ROOT: ${{ inputs.infra_root || secrets.INFRA_ROOT || '/opt/infra' }}
-      MYSQL_USERNAME: ${{ inputs.mysql_username || secrets.MYSQL_USERNAME || 'root' }}
-      MYSQL_PASSWORD: ${{ inputs.mysql_password || secrets.MYSQL_PASSWORD || secrets.MYSQL_ROOT_PASSWORD }}
-      MYSQL_BIND_ADDRESS: ${{ inputs.mysql_bind_address || vars.MYSQL_BIND_ADDRESS || '127.0.0.1' }}
-      REDIS_PASSWORD: ${{ inputs.redis_password || secrets.REDIS_PASSWORD }}
-      REDIS_BIND_ADDRESS: ${{ inputs.redis_bind_address || vars.REDIS_BIND_ADDRESS || '127.0.0.1' }}
-      RABBITMQ_USERNAME: ${{ inputs.rabbitmq_username || secrets.RABBITMQ_USERNAME || 'root' }}
-      RABBITMQ_PASSWORD: ${{ inputs.rabbitmq_password || secrets.RABBITMQ_PASSWORD }}
-      RABBITMQ_BIND_ADDRESS: ${{ inputs.rabbitmq_bind_address || vars.RABBITMQ_BIND_ADDRESS || '127.0.0.1' }}
-      RABBITMQ_DOMAIN: ${{ inputs.rabbitmq_domain || secrets.RABBITMQ_DOMAIN || vars.RABBITMQ_DOMAIN }}
-      RABBITMQ_ALLOWED_IPS: ${{ inputs.rabbitmq_allowed_ips || vars.RABBITMQ_ALLOWED_IPS }}
-      TLS_CERT_PEM_BASE64: ${{ secrets.TLS_CERT_PEM_BASE64 }}      # optional: the certificate of the RabbitMQ page (else one already installed for its domain, e.g. by a service, is used)
-      TLS_KEY_PEM_BASE64: ${{ secrets.TLS_KEY_PEM_BASE64 }}
+      HOST: ${{ inputs.server_host }}
+      USER: ${{ inputs.ssh_user }}
+      PORT: ${{ inputs.ssh_port }}
+      INFRA_ROOT: ${{ inputs.infra_root }}
+      MYSQL_USERNAME: ${{ inputs.mysql_username }}
+      MYSQL_PASSWORD: ${{ inputs.mysql_password }}
+      MYSQL_BIND_ADDRESS: ${{ inputs.mysql_bind_address }}
+      REDIS_PASSWORD: ${{ inputs.redis_password }}
+      REDIS_BIND_ADDRESS: ${{ inputs.redis_bind_address }}
+      RABBITMQ_USERNAME: ${{ inputs.rabbitmq_username }}
+      RABBITMQ_PASSWORD: ${{ inputs.rabbitmq_password }}
+      RABBITMQ_BIND_ADDRESS: ${{ inputs.rabbitmq_bind_address }}
+      RABBITMQ_DOMAIN: ${{ inputs.rabbitmq_domain }}
+      RABBITMQ_ALLOWED_IPS: ${{ inputs.rabbitmq_allowed_ips }}
     steps:
       - uses: actions/checkout@v4
 
@@ -98,8 +97,8 @@ jobs:
         run: |
           # keep typed passwords out of the logs
           for v in MYSQL_PASSWORD REDIS_PASSWORD RABBITMQ_PASSWORD; do [ -n "${!v}" ] && echo "::add-mask::${!v}"; done
-          [ -n "$HOST" ] || { echo "::error::Give the server's IP address (input server_host, or the SERVER_HOST secret)."; exit 1; }
-          for v in MYSQL_PASSWORD REDIS_PASSWORD RABBITMQ_PASSWORD; do [ -n "${!v}" ] || { echo "::error::$v is empty: type it as an input or add it as a secret of the '${{ github.ref_name }}' environment."; exit 1; }; done
+          [ -n "$HOST" ] || { echo "::error::Give the server's IP address (input server_host)."; exit 1; }
+          for v in MYSQL_PASSWORD REDIS_PASSWORD RABBITMQ_PASSWORD; do [ -n "${!v}" ] || { echo "::error::$v is empty: type it as an input of the run."; exit 1; }; done
           [[ "$MYSQL_USERNAME" =~ ^[A-Za-z0-9_]{1,32}$ ]] || { echo "::error::The MySQL user must be letters, digits and _ (at most 32)."; exit 1; }
           [ -z "$RABBITMQ_DOMAIN" ] || [[ "$RABBITMQ_DOMAIN" =~ ^([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]] || { echo "::error::The RabbitMQ domain is not a host name (e.g. rabbitmq.example.com)."; exit 1; }
           [[ "$RABBITMQ_ALLOWED_IPS" =~ ^[0-9A-Fa-f:./,]*$ ]] || { echo "::error::The allowed addresses must be IPs or networks separated by commas."; exit 1; }
@@ -153,20 +152,9 @@ jobs:
         if: env.RABBITMQ_DOMAIN != ''
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
-          CERT_ARGS=""; REMOTE_TMP=""
-          if [ -n "$TLS_CERT_PEM_BASE64" ] && [ -n "$TLS_KEY_PEM_BASE64" ]; then
-            REMOTE_TMP="/tmp/route-$GITHUB_RUN_ID-$RANDOM"
-            umask 077
-            printf '%s' "$TLS_CERT_PEM_BASE64" | base64 -d > "$RUNNER_TEMP/fullchain.pem"
-            printf '%s' "$TLS_KEY_PEM_BASE64" | base64 -d > "$RUNNER_TEMP/privkey.pem"
-            $SSH "$USER@$HOST" "umask 077 && mkdir -p $REMOTE_TMP"
-            scp -i "$HOME/.ssh/deploy_key" -P "$PORT" -o StrictHostKeyChecking=accept-new "$RUNNER_TEMP/fullchain.pem" "$RUNNER_TEMP/privkey.pem" "$USER@$HOST:$REMOTE_TMP/"
-            rm -f "$RUNNER_TEMP/fullchain.pem" "$RUNNER_TEMP/privkey.pem"
-            CERT_ARGS="--cert $REMOTE_TMP/fullchain.pem --key $REMOTE_TMP/privkey.pem"
-          fi
           ALLOW_ARGS=""; [ -z "$RABBITMQ_ALLOWED_IPS" ] || ALLOW_ARGS="--allow $RABBITMQ_ALLOWED_IPS"
-          # the services and MySQL / Redis / RabbitMQ are installed at this point; only the page is missing, so a missing certificate is a warning, not a failure
-          if ! $SSH "$USER@$HOST" "nginx-route add --host $RABBITMQ_DOMAIN --target rabbitmq:15672 $ALLOW_ARGS $CERT_ARGS; rc=\$?; [ -z '$REMOTE_TMP' ] || rm -rf '$REMOTE_TMP'; exit \$rc"; then
-            echo "::warning::The RabbitMQ page https://$RABBITMQ_DOMAIN was not published (see the message above, usually: no certificate for its domain yet). Add the TLS_CERT_PEM_BASE64 / TLS_KEY_PEM_BASE64 secrets and run again, or deploy a service of that domain first."
+          # the certificate is not handled here: the one a service has installed for this domain is used. Without one this is a warning, not a failure (the install above is complete).
+          if ! $SSH "$USER@$HOST" "nginx-route add --host $RABBITMQ_DOMAIN --target rabbitmq:15672 $ALLOW_ARGS"; then
+            echo "::warning::The RabbitMQ page https://$RABBITMQ_DOMAIN was not published: there is no certificate for its domain on the server yet. Deploy a service of the same domain first (it installs the certificate), then run this workflow again."
           fi
           [ -n "$ALLOW_ARGS" ] || echo "::notice::The RabbitMQ page is open to every address; only the RabbitMQ login protects it. Consider rabbitmq_allowed_ips."
