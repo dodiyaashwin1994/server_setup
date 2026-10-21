@@ -1,18 +1,16 @@
 name: Setup infrastructure
 
-# Installs the shared part of a server, once: Docker, a firewall that opens SSH / HTTP / HTTPS, the nginx edge, MySQL, Redis and RabbitMQ, and the `nginx-route` command.
-# Run it for a new server, or again to change a password or a bind address (the host files and certificates the services have put on the server are kept; the services of your applications are not touched; MySQL's root password is only set on the very first start, see the README).
-# Each service then publishes its own address when it is deployed (see its deploy workflow); this workflow knows no app. HTTPS certificates are free Let's Encrypt ones: `nginx-route add`
-# requests one for every host name the first time it is published (the name must point to this server and port 80 must be reachable), and the certbot container renews them.
-
-#
-# Everything is asked here, as inputs of the run: nothing is read from secrets or variables of this repository, except the SSH private key (the secret SSH_PRIVATE_KEY of the
-# environment; the branch picks it: main, dev, uat). The typed passwords are masked in the logs, but stay visible in the run's inputs to everyone who can read this repository's runs.
+# The shared part of a server: Docker, a firewall, the nginx edge, certbot (free Let's Encrypt certificates), MySQL, Redis, RabbitMQ and the `nginx-route` command. Tick what you want
+# (re)deployed: a ticked service is pulled and recreated with the current settings; an unticked one is not touched at all. First time on a server: tick prepare_server and everything.
+# Everything is asked here, as inputs of the run: nothing is read from secrets or variables of this repository, except the SSH private key (the secret SSH_PRIVATE_KEY of the environment;
+# the branch picks it: main, dev, uat). Typed passwords are masked in the logs, but stay visible in the run's inputs to everyone who can read this repository's runs.
+# A value left empty keeps the one already in /opt/infra/.env on the server, so redeploying one service does not need every password again.
+# Each service publishes its own address when it is deployed (see its workflow); HTTPS certificates are free Let's Encrypt ones that `nginx-route add` requests for each host name.
 on:
   workflow_dispatch:
     inputs:
       server_host:
-        description: IP address (or host name) of the server to set up
+        description: IP address (or host name) of the server
         type: string
         required: true
       ssh_user:
@@ -24,41 +22,65 @@ on:
         type: string
         default: "22"
       infra_root:
-        description: Folder of the shared services on the server (the services of the applications go to /opt/saas, see their deploy workflows)
+        description: Folder of the shared services on the server (the application services go to /opt/saas, see their deploy workflows)
         type: string
         default: /opt/infra
+      prepare_server:
+        description: "Prepare the server: install Docker if missing, create the network, set the firewall (22, 80, 443), remove old rules that opened database ports. Tick the first time"
+        type: boolean
+        default: false
+      deploy_nginx:
+        description: "Deploy / redeploy nginx (the edge). It restarts: a few seconds without HTTPS"
+        type: boolean
+        default: false
+      deploy_certbot:
+        description: "Deploy / redeploy certbot (renews the Let's Encrypt certificates)"
+        type: boolean
+        default: false
+      deploy_mysql:
+        description: "Deploy / redeploy MySQL (restarts it; data is kept). This also applies mysql_remote_ips below: an empty list closes the port"
+        type: boolean
+        default: false
+      deploy_redis:
+        description: "Deploy / redeploy Redis (restarts it)"
+        type: boolean
+        default: false
+      deploy_rabbitmq:
+        description: "Deploy / redeploy RabbitMQ (restarts it; its data and users are kept)"
+        type: boolean
+        default: false
       mysql_username:
-        description: "MySQL user the services log in with (root, or another user that is created with every privilege)"
+        description: "MySQL user the services log in with: root, or another name that is created with every privilege (empty = keep, root if new)"
         type: string
-        default: root
+        required: false
       mysql_password:
-        description: MySQL password of that user (also the password of root)
+        description: "MySQL password of that user, also root's (empty = keep). Only set on the very first start of MySQL; see the README"
         type: string
-        required: true
-      mysql_bind_address:
-        description: "Address MySQL's published port listens on. Not needed: 127.0.0.1 (this machine only) is enough, apps use the docker network"
+        required: false
+      mysql_remote_ips:
+        description: "Addresses allowed to connect to MySQL from outside (e.g. 203.0.113.7 or 203.0.113.0/24, comma separated). Empty = the port stays closed. Used when MySQL is deployed"
         type: string
-        default: 127.0.0.1
+        required: false
+      mysql_remote_user:
+        description: "Login for those addresses (never root; root only works inside the server's docker network)"
+        type: string
+        default: dba
+      mysql_remote_password:
+        description: "Password of that login, at least 12 characters (empty = keep). Required when mysql_remote_ips is set"
+        type: string
+        required: false
       redis_password:
-        description: Redis password
+        description: Redis password (empty = keep)
         type: string
-        required: true
-      redis_bind_address:
-        description: "Address Redis's published port listens on (127.0.0.1 = this machine only)"
-        type: string
-        default: 127.0.0.1
+        required: false
       rabbitmq_username:
-        description: RabbitMQ user
+        description: RabbitMQ user (empty = keep, root if new). Only created on the first start of RabbitMQ
         type: string
-        default: root
+        required: false
       rabbitmq_password:
-        description: RabbitMQ password
+        description: RabbitMQ password (empty = keep)
         type: string
-        required: true
-      rabbitmq_bind_address:
-        description: "Address RabbitMQ's published port listens on (127.0.0.1 = this machine only)"
-        type: string
-        default: 127.0.0.1
+        required: false
       acme_email:
         description: "E-mail address for Let's Encrypt (it writes to it before a certificate expires)"
         type: string
@@ -69,7 +91,7 @@ on:
         type: boolean
         default: false
       rabbitmq_domain:
-        description: "Host name of the RabbitMQ management page, e.g. rabbitmq.example.com (empty = not published). Needs a certificate: see the README"
+        description: "Host name of the RabbitMQ management page, e.g. rabbitmq.example.com (empty = not published). Its certificate is requested from Let's Encrypt"
         type: string
         required: false
       rabbitmq_allowed_ips:
@@ -90,14 +112,20 @@ jobs:
       USER: ${{ inputs.ssh_user }}
       PORT: ${{ inputs.ssh_port }}
       INFRA_ROOT: ${{ inputs.infra_root }}
+      PREPARE_SERVER: ${{ inputs.prepare_server }}
+      DEPLOY_NGINX: ${{ inputs.deploy_nginx }}
+      DEPLOY_CERTBOT: ${{ inputs.deploy_certbot }}
+      DEPLOY_MYSQL: ${{ inputs.deploy_mysql }}
+      DEPLOY_REDIS: ${{ inputs.deploy_redis }}
+      DEPLOY_RABBITMQ: ${{ inputs.deploy_rabbitmq }}
       MYSQL_USERNAME: ${{ inputs.mysql_username }}
       MYSQL_PASSWORD: ${{ inputs.mysql_password }}
-      MYSQL_BIND_ADDRESS: ${{ inputs.mysql_bind_address }}
+      MYSQL_REMOTE_IPS: ${{ inputs.mysql_remote_ips }}
+      MYSQL_REMOTE_USER: ${{ inputs.mysql_remote_user }}
+      MYSQL_REMOTE_PASSWORD: ${{ inputs.mysql_remote_password }}
       REDIS_PASSWORD: ${{ inputs.redis_password }}
-      REDIS_BIND_ADDRESS: ${{ inputs.redis_bind_address }}
       RABBITMQ_USERNAME: ${{ inputs.rabbitmq_username }}
       RABBITMQ_PASSWORD: ${{ inputs.rabbitmq_password }}
-      RABBITMQ_BIND_ADDRESS: ${{ inputs.rabbitmq_bind_address }}
       ACME_EMAIL: ${{ inputs.acme_email }}
       ACME_STAGING: ${{ inputs.acme_staging }}
       RABBITMQ_DOMAIN: ${{ inputs.rabbitmq_domain }}
@@ -108,26 +136,35 @@ jobs:
       - name: Check the values
         run: |
           # keep typed passwords out of the logs
-          for v in MYSQL_PASSWORD REDIS_PASSWORD RABBITMQ_PASSWORD; do [ -n "${!v}" ] && echo "::add-mask::${!v}"; done
+          for v in MYSQL_PASSWORD MYSQL_REMOTE_PASSWORD REDIS_PASSWORD RABBITMQ_PASSWORD; do [ -z "${!v}" ] || echo "::add-mask::${!v}"; done
           [ -n "$HOST" ] || { echo "::error::Give the server's IP address (input server_host)."; exit 1; }
-          for v in MYSQL_PASSWORD REDIS_PASSWORD RABBITMQ_PASSWORD; do [ -n "${!v}" ] || { echo "::error::$v is empty: type it as an input of the run."; exit 1; }; done
-          [[ "$MYSQL_USERNAME" =~ ^[A-Za-z0-9_]{1,32}$ ]] || { echo "::error::The MySQL user must be letters, digits and _ (at most 32)."; exit 1; }
+          [[ "$MYSQL_USERNAME" =~ ^[A-Za-z0-9_]{0,32}$ ]] || { echo "::error::The MySQL user must be letters, digits and _ (at most 32)."; exit 1; }
           [ -z "$RABBITMQ_DOMAIN" ] || [[ "$RABBITMQ_DOMAIN" =~ ^([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]] || { echo "::error::The RabbitMQ domain is not a host name (e.g. rabbitmq.example.com)."; exit 1; }
           [[ "$RABBITMQ_ALLOWED_IPS" =~ ^[0-9A-Fa-f:./,]*$ ]] || { echo "::error::The allowed addresses must be IPs or networks separated by commas."; exit 1; }
           [[ "$HOST$USER$PORT" =~ ^[A-Za-z0-9._@:-]+$ ]] || { echo "::error::The host, user or port has unexpected characters."; exit 1; }
           # this folder is synced with --delete: it must be a folder of its own, two levels deep at least (/opt/infra), never a system folder
           [[ "$INFRA_ROOT" =~ ^/[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+$ ]] || { echo "::error::The infra folder must be an absolute path without spaces, at least two levels deep (e.g. /opt/infra)."; exit 1; }
           case "$INFRA_ROOT" in /usr/*|/etc/*|/var/*|/bin/*|/sbin/*|/lib*|/boot/*|/root/*|/home|/home/) echo "::error::$INFRA_ROOT is a system folder: use a folder of its own such as /opt/infra."; exit 1 ;; esac
+          [ -z "$MYSQL_REMOTE_IPS" ] || [ "$DEPLOY_MYSQL" = true ] || echo "::warning::mysql_remote_ips is only applied when deploy_mysql is ticked: it is ignored in this run."
+          S=""; for v in NGINX CERTBOT MYSQL REDIS RABBITMQ; do n="DEPLOY_$v"; [ "${!n}" != true ] || S="$S $(echo $v | tr A-Z a-z)"; done
+          [ "$PREPARE_SERVER" = true ] && echo "Server will be prepared." || true
+          echo "Services to (re)deploy:${S:- none (the files and nginx-route are updated only)}"
 
       - name: Configure SSH key
         env:
           SECRET_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: bash scripts/configure-ssh-key.sh
 
+      - name: Fetch the settings the server already has
+        run: |
+          # a value left empty in this run keeps the one the server has (nothing to fetch the first time)
+          scp -q -i "$HOME/.ssh/deploy_key" -P "$PORT" -o StrictHostKeyChecking=accept-new "$USER@$HOST:$INFRA_ROOT/.env" infra/.env.server 2>/dev/null && echo "found the server's current settings" || echo "no settings on the server yet"
+
       - name: Render the settings
         run: python3 scripts/render_env.py
 
       - name: Prepare the server
+        if: inputs.prepare_server
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
           scp -i "$HOME/.ssh/deploy_key" -P "$PORT" -o StrictHostKeyChecking=accept-new scripts/bootstrap-server.sh "$USER@$HOST:/tmp/bootstrap-server.sh"
@@ -137,25 +174,35 @@ jobs:
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
           $SSH "$USER@$HOST" "mkdir -p '$INFRA_ROOT/nginx/sites' '$INFRA_ROOT/certs' '$INFRA_ROOT/letsencrypt' '$INFRA_ROOT/acme-webroot'"
-          # the host files and certificates put there by the services' deploys (nginx-route) are never deleted by a sync
-          rsync -az --delete --exclude 'nginx/sites/' --exclude 'certs/' --exclude 'letsencrypt/' --exclude 'acme-webroot/' --exclude '.nginx-route.lock' -e "$SSH" infra/ "$USER@$HOST:$INFRA_ROOT/"
+          # the host files and certificates (nginx-route, certbot) are never deleted by a sync
+          rsync -az --delete --exclude 'nginx/sites/' --exclude 'certs/' --exclude 'letsencrypt/' --exclude 'acme-webroot/' --exclude '.nginx-route.lock' --exclude '.env.server' -e "$SSH" infra/ "$USER@$HOST:$INFRA_ROOT/"
           sed "s|__INFRA_DIR__|$INFRA_ROOT|" scripts/nginx-route.sh | $SSH "$USER@$HOST" "cat > /usr/local/bin/nginx-route && chmod 755 /usr/local/bin/nginx-route"
 
-      - name: Start the shared services
+      - name: Deploy the ticked services
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key -p $PORT -o StrictHostKeyChecking=accept-new"
+          SERVICES=""
+          for v in NGINX CERTBOT MYSQL REDIS RABBITMQ; do n="DEPLOY_$v"; [ "${!n}" != true ] || SERVICES="$SERVICES $(echo $v | tr A-Z a-z)"; done
           $SSH "$USER@$HOST" bash -s <<REMOTE
             set -euo pipefail
             cd '$INFRA_ROOT'
             docker network inspect public >/dev/null 2>&1 || docker network create public
-            docker compose pull
-            docker compose up -d --remove-orphans
-            echo "Waiting for MySQL..."
-            for i in \$(seq 1 60); do [ "\$(docker inspect -f '{{.State.Health.Status}}' mysql 2>/dev/null)" = healthy ] && break; sleep 3; done
-            set -a; . ./.env; set +a
-            bash mysql/ensure-user.sh
-            docker compose exec -T nginx nginx -t
-            docker compose exec -T nginx nginx -s reload
+            if [ -n '$SERVICES' ]; then
+              docker compose pull $SERVICES
+              docker compose up -d --force-recreate --no-deps $SERVICES
+            else
+              echo "No service ticked: nothing redeployed."
+            fi
+            if [ "$DEPLOY_MYSQL" = true ]; then
+              echo "Waiting for MySQL..."
+              for i in \$(seq 1 60); do [ "\$(docker inspect -f '{{.State.Health.Status}}' mysql 2>/dev/null)" = healthy ] && break; sleep 3; done
+              set -a; . ./.env; set +a
+              bash mysql/ensure-user.sh
+            fi
+            if docker ps --format '{{.Names}}' | grep -qx nginx; then
+              docker compose exec -T nginx nginx -t
+              docker compose exec -T nginx nginx -s reload
+            fi
             echo "Hosts served now:"; nginx-route list || true
             docker compose ps
           REMOTE
@@ -167,6 +214,6 @@ jobs:
           ALLOW_ARGS=""; [ -z "$RABBITMQ_ALLOWED_IPS" ] || ALLOW_ARGS="--allow $RABBITMQ_ALLOWED_IPS"
           # a certificate for the domain is requested from Let's Encrypt by nginx-route (the name must point to this server). A failure here is a warning: the install above is complete.
           if ! $SSH "$USER@$HOST" "nginx-route add --host $RABBITMQ_DOMAIN --target rabbitmq:15672 $ALLOW_ARGS"; then
-            echo "::warning::The RabbitMQ page https://$RABBITMQ_DOMAIN was not published (see the message above). Usually the name does not point to this server yet (add its A record) or port 80 is blocked; fix it and run this workflow again."
+            echo "::warning::The RabbitMQ page https://$RABBITMQ_DOMAIN was not published (see the message above). Usually the name does not point to this server yet (add its A record) or port 80 is blocked, or nginx is not running (tick deploy_nginx); fix it and run this workflow again."
           fi
           [ -n "$ALLOW_ARGS" ] || echo "::notice::The RabbitMQ page is open to every address; only the RabbitMQ login protects it. Consider rabbitmq_allowed_ips."

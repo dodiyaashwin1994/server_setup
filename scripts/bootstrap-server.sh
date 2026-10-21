@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prepares a fresh Ubuntu/Debian server: Docker, the shared network, the folders /opt/infra and /opt/saas and a firewall that opens SSH, HTTP and HTTPS only.
-# MySQL, Redis and RabbitMQ are not opened to the internet.
+# MySQL, Redis and RabbitMQ are not opened to the internet by the firewall (a docker-published port bypasses ufw anyway: see mysql_remote_ips in the workflow).
 set -euo pipefail
 INFRA_ROOT="${INFRA_ROOT:-/opt/infra}"      # MySQL, Redis, RabbitMQ and the nginx edge
 APPS_ROOT="${APPS_ROOT:-/opt/saas}"         # the application services (backend, frontend): each deploys into its own folder here
@@ -23,6 +23,8 @@ docker network inspect public >/dev/null 2>&1 || docker network create public
 
 mkdir -p "$INFRA_ROOT" "$APPS_ROOT"
 
+# an older version of this setup opened the database ports to the whole internet: close those rules (the services reach the databases through the docker network)
+for p in 3306 6379 5672 15672; do ufw delete allow "$p/tcp" >/dev/null 2>&1 || true; done
 ufw allow OpenSSH || true
 ufw allow 80/tcp || true
 ufw allow 443/tcp || true

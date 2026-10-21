@@ -6,35 +6,41 @@ The shared part of a server that hosts several apps: the **nginx edge**, **certb
 - `/opt/infra`: this repository's services (nginx, MySQL, Redis, RabbitMQ: `docker-compose.yml`, `.env`, `nginx/`, `certs/`, `mysql/`). Synced by this workflow with `--delete`, so keep nothing of your own in it except what the services put there (`nginx/sites/`, `certs/`).
 - `/opt/saas`: the application services (backend, frontend), one folder each, e.g. `/opt/saas/leezify_lease-main`. Their deploy workflows manage them.
 
-## 1. Install (once per server): *Actions -> Setup infrastructure -> Run workflow*
+## 1. *Actions -> Setup infrastructure -> Run workflow*
+
+Tick what you want (re)deployed. **A ticked service is pulled and recreated with the current settings; an unticked one is not touched at all** (even if its settings changed). The first time on a server, tick `prepare_server` and every service. Later, tick only what changed.
 
 | Input | Meaning |
 |---|---|
-| `server_host` | IP address of the server to set up (required). |
+| `server_host` | IP address of the server (required). |
 | `ssh_user`, `ssh_port`, `infra_root` | `root`, `22`, `/opt/infra` by default. |
-| `mysql_username` | The MySQL user the services log in with: `root` (default), or another name, which is created with every privilege (the lease service creates a database per account). |
-| `mysql_password` | That user's password (also root's). |
-| `redis_password` | Redis password. |
-| `rabbitmq_username`, `rabbitmq_password` | RabbitMQ login. |
-| `rabbitmq_domain` | Host name of the RabbitMQ management page (the web UI), e.g. `rabbitmq.ailease.tech`. Empty = not published. |
-| `rabbitmq_allowed_ips` | Addresses allowed to open that page, e.g. `203.0.113.0/24,198.51.100.7`. Empty = everyone who knows the login. |
+| `prepare_server` | Installs Docker if missing, creates the docker network, sets the firewall (22, 80, 443) and removes old rules that opened database ports. Tick it the first time. |
+| `deploy_nginx`, `deploy_certbot`, `deploy_mysql`, `deploy_redis`, `deploy_rabbitmq` | The services. nginx restarts (a few seconds without HTTPS); MySQL, Redis and RabbitMQ restart too (their data is kept). |
+| `mysql_username`, `mysql_password` | The MySQL login the services use (`root`, or another name that is created with every privilege). |
+| `mysql_remote_ips`, `mysql_remote_user`, `mysql_remote_password` | Direct access to MySQL from your computer, see below. |
+| `redis_password`, `rabbitmq_username`, `rabbitmq_password` | Redis and RabbitMQ logins. |
 | `acme_email` | E-mail address for Let's Encrypt: it writes there before a certificate expires. Prefilled with `dodiyaashwin1994@gmail.com`. |
-| `acme_staging` | Tick it to use Let's Encrypt's test service while trying things out (its certificates are not trusted by browsers, but it has no rate limits). Leave it off for real use. |
-| `*_bind_address` | Address the published port of MySQL / Redis / RabbitMQ listens on. **Leave `127.0.0.1`** (see below). |
+| `acme_staging` | Let's Encrypt's test service while trying things out (not trusted by browsers, no rate limits). Off for real use. |
+| `rabbitmq_domain`, `rabbitmq_allowed_ips` | Publish the RabbitMQ management page, optionally only for some addresses. |
 
-**Everything is typed as an input of the run; this repository keeps no secrets or variables of its own, except `SSH_PRIVATE_KEY`** (the deploy key for the server, a secret of the `main` environment; the branch picks the environment). The typed passwords are masked in the logs, but they stay visible in the run's inputs to everyone who can read this repository's workflow runs, so keep the repository private. `server_host`, `mysql_password`, `redis_password` and `rabbitmq_password` are required. dev and uat run on main's server: do not run this for them. dev and uat run on main's server: do not run this for them.
+**A value left empty keeps the one already in `/opt/infra/.env` on the server**, so redeploying one service does not need every password again; a first install needs them typed. **Everything is typed as an input of the run; this repository keeps no secrets or variables of its own, except `SSH_PRIVATE_KEY`** (the deploy key for the server, a secret of the `main` environment; the branch picks the environment). The typed passwords are masked in the logs, but they stay visible in the run's inputs to everyone who can read this repository's workflow runs, so keep the repository private. dev and uat run on main's server: do not run this for them.
 
-It prepares Docker and a firewall (SSH, 80, 443), starts the four services, installs `nginx-route`, and is safe to run again (a password or setting changed). The host files and certificates the services have put on the server are kept.
+The values you give must be the ones the services use: `DB_USERNAME` and `DB_PASSWORD` (MySQL), `REDIS_PASSWORD`, `RABBITMQ_USERNAME` and `RABBITMQ_PASSWORD` of the service env files. **MySQL and RabbitMQ apply their password (and RabbitMQ its user) only when their data is first created**, so typing different ones later changes nothing for them; a non-root MySQL user is created or updated on every MySQL deploy (`infra/mysql/ensure-user.sh`); for root use `ALTER USER`.
 
-The values you give here must be the ones the services use: `DB_USERNAME` and `DB_PASSWORD` (MySQL), `REDIS_PASSWORD`, `RABBITMQ_USERNAME` and `RABBITMQ_PASSWORD` of the service env files.
+### Connecting to MySQL from your computer (Workbench)
+MySQL's port is closed to the internet by default (the services use the docker network). To connect directly, tick `deploy_mysql` and fill in:
+- `mysql_remote_ips`: **your own public IP address** (find it with `curl https://api.ipify.org`), or a network such as `203.0.113.0/24`. A home or mobile address changes now and then: run again with the new one. Anything wider than a /16, "everyone" and IPv6 are refused.
+- `mysql_remote_user` (default `dba`) and `mysql_remote_password` (at least 12 characters): the login you type in Workbench. It has every privilege, and works only from the listed addresses.
 
-**MySQL, on a server that already has data:** the MySQL image sets root's password only on the very first start, so typing a different password later does not change root's. A non-root user is created or updated on every run (`infra/mysql/ensure-user.sh`: create if missing, set the password, grant everything), so *its* password can be changed by running the workflow again. To change root's password, do it in MySQL (`ALTER USER`).
+Then in Workbench: Standard TCP/IP, host = the server, port `3306`, that user and password.
+
+How it is protected: the port is open to the internet (docker publishes it around the firewall), so MySQL itself refuses everyone else, and it checks the caller's address **before** the password: a stranger gets "Host ... is not allowed to connect" and never reaches a password prompt. `root` and the service user are limited to the server's docker network, where the services run, so they cannot be used from outside at all. **An empty list closes the port again** when MySQL is deployed. A tunnel (`ssh -L 3307:127.0.0.1:3306 root@<server>`) needs none of this and works from any address.
 
 ### The RabbitMQ management page
-With `rabbitmq_domain` the workflow publishes `https://<domain>` (the management web UI, container `rabbitmq:15672`) through the nginx edge; you sign in with the RabbitMQ user and password given above. Add an `A` record for the domain (the wildcard `A *` already covers a subdomain). Its certificate is requested from Let's Encrypt like any other host's: the domain must point to this server (a subdomain is already covered by the `A *` record) and port 80 must be reachable. If that fails the install still finishes and the run shows a warning; fix the cause and run again. Because the page can administer the message broker, set `rabbitmq_allowed_ips` to your office or VPN addresses if you can. To take the page down: `nginx-route remove --host <domain>` on the server.
+With `rabbitmq_domain` the workflow publishes `https://<domain>` (the management web UI, container `rabbitmq:15672`) through the nginx edge; you sign in with the RabbitMQ user and password. Add an `A` record for the domain (the wildcard `A *` already covers a subdomain). Its certificate is requested from Let's Encrypt like any other host's: the domain must point to this server and port 80 must be reachable. If that fails the run shows a warning; fix the cause and run again. Because the page can administer the message broker, set `rabbitmq_allowed_ips` to your own addresses if you can. To take it down: `nginx-route remove --host <domain>` on the server.
 
 ### Do you need a bind address?
-No. The apps reach MySQL, Redis and RabbitMQ through the docker network (`mysql`, `redis`, `rabbitmq`), which does not use the published ports at all. The published ports exist only for tools on the server itself (or an SSH tunnel, e.g. `ssh -L 3306:127.0.0.1:3306`), so `127.0.0.1` is right. Binding to `0.0.0.0` or the public IP puts the database on the internet: docker publishes ports around `ufw`, so the firewall does **not** protect it. Use it only for a private network address and with a firewall in front. The RabbitMQ management port (15672) is always local; the page is published separately through nginx (above).
+No. The apps reach Redis, RabbitMQ and MySQL through the docker network, which does not use the published ports at all. Redis and RabbitMQ stay on `127.0.0.1` (this machine only); MySQL's port opens only through `mysql_remote_ips`, above. The RabbitMQ management port (15672) is always local; the page is published separately through nginx.
 
 ## 2. Each app publishes itself: `nginx-route`
 
