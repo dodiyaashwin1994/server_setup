@@ -58,9 +58,9 @@ on:
         type: string
         required: false
       mysql_port:
-        description: "Port on the server that leads to MySQL for tools outside (e.g. Workbench). It is only open when mysql_remote_ips is set. Inside the server MySQL stays on 3306"
+        description: "Port on the server that leads to MySQL for tools outside (e.g. Workbench). It is only open when mysql_remote_ips is set. 3306 is MySQL's usual port"
         type: string
-        default: "4567"
+        default: "3306"
       mysql_remote_ips:
         description: "Who may connect to MySQL from outside: addresses (e.g. 203.0.113.7 or 203.0.113.0/24, comma separated), or the word any = EVERYONE (only the password protects it). Empty = nobody from outside and the port stays closed"
         type: string
@@ -146,7 +146,7 @@ jobs:
           [[ "$INFRA_ROOT" =~ ^/[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+$ ]] || { echo "::error::The infra folder must be an absolute path without spaces, at least two levels deep (e.g. /opt/infra)."; exit 1; }
           case "$INFRA_ROOT" in /usr/*|/etc/*|/var/*|/bin/*|/sbin/*|/lib*|/boot/*|/root/*|/home|/home/) echo "::error::$INFRA_ROOT is a system folder: use a folder of its own such as /opt/infra."; exit 1 ;; esac
           [ "${MYSQL_REMOTE_IPS,,}" != any ] && [ "$MYSQL_REMOTE_IPS" != "*" ] || echo "::warning::MySQL will be OPEN TO EVERYONE on port $MYSQL_PORT (mysql_remote_ips = any): only the MySQL password protects it. Use a long, unique password."
-          [[ "$MYSQL_PORT" =~ ^[0-9]{4,5}$ ]] || { echo "::error::mysql_port must be a number such as 4567."; exit 1; }
+          [[ "$MYSQL_PORT" =~ ^[0-9]{4,5}$ ]] || { echo "::error::mysql_port must be a number such as 3306."; exit 1; }
           [ -z "$MYSQL_REMOTE_IPS" ] || [ "$DEPLOY_MYSQL" = true ] || [ "$UPDATE_MYSQL_ACCESS" = true ] || echo "::warning::mysql_remote_ips is only applied when deploy_mysql (or update_mysql_access) is ticked: it is ignored in this run."
           S=""; for v in NGINX CERTBOT MYSQL REDIS RABBITMQ; do n="DEPLOY_$v"; [ "${!n}" != true ] || S="$S $(echo $v | tr A-Z a-z)"; done
           [ "$PREPARE_SERVER" = true ] && echo "Server will be prepared." || true

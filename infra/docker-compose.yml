@@ -50,7 +50,7 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
     ports:
-      - "${MYSQL_BIND_ADDRESS:-127.0.0.1}:${MYSQL_PORT:-4567}:3306"          # outside port 4567 -> MySQL (3306 inside); open only when mysql_remote_ips is set
+      - "${MYSQL_BIND_ADDRESS:-127.0.0.1}:${MYSQL_PORT:-3306}:3306"          # the port tools outside the server use (3306 inside); open only when mysql_remote_ips is set
     volumes:
       - mysql_data:/var/lib/mysql
       - ./mysql/initdb:/docker-entrypoint-initdb.d:ro

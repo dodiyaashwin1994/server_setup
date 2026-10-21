@@ -4,7 +4,7 @@
 A value typed in the workflow wins; a value left empty keeps the one in the .env already on the server (the workflow fetches it to infra/.env.server first), so a run that redeploys
 one service does not need every password again. Only what is neither typed nor on the server is an error.
 
-MySQL's port (MYSQL_PORT, 4567 by default, published for tools outside the server): closed (127.0.0.1) unless MYSQL_REMOTE_IPS lists the addresses that may connect, or says `any` (everyone). The list is applied when MySQL
+MySQL's port (MYSQL_PORT, 3306 by default, published for tools outside the server): closed (127.0.0.1) unless MYSQL_REMOTE_IPS lists the addresses that may connect, or says `any` (everyone). The list is applied when MySQL
 is deployed (DEPLOY_MYSQL=true; an empty list closes the port) or when only its accounts are updated (UPDATE_MYSQL_ACCESS=true, no restart; opening or closing the port itself needs a deploy).
 Redis and RabbitMQ stay on 127.0.0.1.
 """
@@ -81,9 +81,9 @@ def main():
     # MySQL's remote access: the listed addresses may log in as root / the service user; the port opens only when MySQL is deployed with a list
     deploy_mysql, update_access = flag('DEPLOY_MYSQL'), flag('UPDATE_MYSQL_ACCESS')
     ips = networks(os.environ.get('MYSQL_REMOTE_IPS', '') if (deploy_mysql or update_access) else existing.get('MYSQL_REMOTE_IPS', ''))
-    port = pick('MYSQL_PORT', '4567')
-    if not port.isdigit() or not 1024 <= int(port) <= 65535 or int(port) in (3306, 6379, 5672, 15672, 80, 443, 22):
-        sys.exit('mysql_port must be a number between 1024 and 65535, not one of the usual service ports (e.g. 4567)')
+    port = pick('MYSQL_PORT', '3306')
+    if not port.isdigit() or not 1024 <= int(port) <= 65535 or int(port) in (6379, 5672, 15672, 80, 443, 22, 33060):
+        sys.exit('mysql_port must be a number between 1024 and 65535 (3306 is MySQL\'s usual port) and not the port of another service (Redis 6379, RabbitMQ 5672 / 15672, ssh, http, https)')
     bind = ('0.0.0.0' if ips else '127.0.0.1') if deploy_mysql else existing.get('MYSQL_BIND_ADDRESS', '127.0.0.1')
     if ips and not deploy_mysql and bind != '0.0.0.0':
         print("WARNING: the MySQL port is still closed: tick deploy_mysql as well to open it (the accounts are updated either way)", file=sys.stderr)
