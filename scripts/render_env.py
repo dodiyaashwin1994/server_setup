@@ -4,7 +4,8 @@
 A value typed in the workflow wins; a value left empty keeps the one in the .env already on the server (the workflow fetches it to infra/.env.server first), so a run that redeploys
 one service does not need every password again. Only what is neither typed nor on the server is an error.
 
-MySQL's port: closed (127.0.0.1) unless MYSQL_REMOTE_IPS lists the addresses that may connect. The list is applied whenever MySQL is deployed (DEPLOY_MYSQL=true), and an empty list closes it.
+MySQL's port (MYSQL_PORT, 4567 by default, published for tools outside the server): closed (127.0.0.1) unless MYSQL_REMOTE_IPS lists the addresses that may connect. The list is applied when MySQL
+is deployed (DEPLOY_MYSQL=true; an empty list closes the port) or when only its accounts are updated (UPDATE_MYSQL_ACCESS=true, no restart; opening or closing the port itself needs a deploy).
 Redis and RabbitMQ stay on 127.0.0.1.
 """
 import ipaddress
@@ -72,33 +73,32 @@ def main():
     if not re.fullmatch(r'[^@\s]+@[^@\s]+\.[A-Za-z]{2,}', email):
         sys.exit("ACME_EMAIL must be an e-mail address (Let's Encrypt writes to it before a certificate expires)")
 
-    # MySQL's remote access: applied when MySQL is (re)deployed; an empty list closes it
-    deploy_mysql = flag('DEPLOY_MYSQL')
-    ips = networks(os.environ.get('MYSQL_REMOTE_IPS', '') if deploy_mysql else existing.get('MYSQL_REMOTE_IPS', ''))
-    remote_user = pick('MYSQL_REMOTE_USER', 'dba')
-    if not re.fullmatch(r'[A-Za-z0-9_]{1,32}', remote_user) or remote_user in ('root', user):
-        sys.exit('mysql_remote_user must be letters, digits and _ (at most 32), and different from root and the service user')
-    remote_pw = pick('MYSQL_REMOTE_PASSWORD')
-    if ips and len(remote_pw) < 12:
-        sys.exit('mysql_remote_password is required (at least 12 characters) when mysql_remote_ips is set: that login is reachable from the internet')
+    # MySQL's remote access: the listed addresses may log in as root / the service user; the port opens only when MySQL is deployed with a list
+    deploy_mysql, update_access = flag('DEPLOY_MYSQL'), flag('UPDATE_MYSQL_ACCESS')
+    ips = networks(os.environ.get('MYSQL_REMOTE_IPS', '') if (deploy_mysql or update_access) else existing.get('MYSQL_REMOTE_IPS', ''))
+    port = pick('MYSQL_PORT', '4567')
+    if not port.isdigit() or not 1024 <= int(port) <= 65535 or int(port) in (3306, 6379, 5672, 15672, 80, 443, 22):
+        sys.exit('mysql_port must be a number between 1024 and 65535, not one of the usual service ports (e.g. 4567)')
     bind = ('0.0.0.0' if ips else '127.0.0.1') if deploy_mysql else existing.get('MYSQL_BIND_ADDRESS', '127.0.0.1')
+    if ips and not deploy_mysql and bind != '0.0.0.0':
+        print("WARNING: the MySQL port is still closed: tick deploy_mysql as well to open it (the accounts are updated either way)", file=sys.stderr)
 
     pairs = [('MYSQL_USERNAME', user), ('MYSQL_PASSWORD', mysql_pw), ('MYSQL_ROOT_PASSWORD', mysql_pw),
-             ('MYSQL_REMOTE_IPS', ','.join(ips)), ('MYSQL_REMOTE_USER', remote_user), ('MYSQL_REMOTE_PASSWORD', remote_pw),
+             ('MYSQL_REMOTE_IPS', ','.join(ips)),
              ('REDIS_PASSWORD', redis_pw), ('RABBITMQ_USERNAME', rabbit_user), ('RABBITMQ_PASSWORD', rabbit_pw),
              ('ACME_EMAIL', email), ('ACME_STAGING', 'true' if flag('ACME_STAGING') else 'false'),
              ('MYSQL_BIND_ADDRESS', bind), ('REDIS_BIND_ADDRESS', '127.0.0.1'), ('RABBITMQ_BIND_ADDRESS', '127.0.0.1'),
-             ('MYSQL_PORT', pick('MYSQL_PORT', '3306')), ('REDIS_PORT', pick('REDIS_PORT', '6379')),
+             ('MYSQL_PORT', port), ('REDIS_PORT', pick('REDIS_PORT', '6379')),
              ('REDIS_MAXMEMORY', pick('REDIS_MAXMEMORY', '512mb')), ('REDIS_MAXMEMORY_POLICY', pick('REDIS_MAXMEMORY_POLICY', 'allkeys-lru'))]
     for k, v in pairs:
         if "'" in v or '\n' in v or '\r' in v:
             sys.exit(f'{k} must not contain a single quote or a line break')
-        if k in ('MYSQL_PASSWORD', 'MYSQL_REMOTE_PASSWORD') and '\\' in v:
+        if k == 'MYSQL_PASSWORD' and '\\' in v:
             sys.exit(f'{k} must not contain a backslash')
     # single quotes: docker compose then takes the value literally ($, #, spaces and all)
     (ROOT / '.env').write_text('\n'.join(f"{k}='{v}'" for k, v in pairs) + '\n')
     (ROOT / '.env').chmod(0o600)
-    print('wrote infra/.env; MySQL port: ' + (f'open to {", ".join(ips)} (login {remote_user})' if ips else 'closed (127.0.0.1)') + ('' if deploy_mysql else ' [as already configured: MySQL is not being redeployed]'))
+    print(f'wrote infra/.env; MySQL port {port}: ' + (f'for {", ".join(ips)} only' if ips else 'closed (127.0.0.1)') + ('' if deploy_mysql or update_access else ' [as already configured: MySQL is not being redeployed]'))
 
 
 if __name__ == '__main__':

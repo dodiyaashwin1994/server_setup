@@ -17,7 +17,7 @@ Tick what you want (re)deployed. **A ticked service is pulled and recreated with
 | `prepare_server` | Installs Docker if missing, creates the docker network, sets the firewall (22, 80, 443) and removes old rules that opened database ports. Tick it the first time. |
 | `deploy_nginx`, `deploy_certbot`, `deploy_mysql`, `deploy_redis`, `deploy_rabbitmq` | The services. nginx restarts (a few seconds without HTTPS); MySQL, Redis and RabbitMQ restart too (their data is kept). |
 | `mysql_username`, `mysql_password` | The MySQL login the services use (`root`, or another name that is created with every privilege). |
-| `mysql_remote_ips`, `mysql_remote_user`, `mysql_remote_password` | Direct access to MySQL from your computer, see below. |
+| `mysql_port`, `mysql_remote_ips`, `update_mysql_access` | Direct access to MySQL from your computer (port 4567, only for the listed addresses), see below. |
 | `redis_password`, `rabbitmq_username`, `rabbitmq_password` | Redis and RabbitMQ logins. |
 | `acme_email` | E-mail address for Let's Encrypt: it writes there before a certificate expires. Prefilled with `dodiyaashwin1994@gmail.com`. |
 | `acme_staging` | Let's Encrypt's test service while trying things out (not trusted by browsers, no rate limits). Off for real use. |
@@ -28,19 +28,20 @@ Tick what you want (re)deployed. **A ticked service is pulled and recreated with
 The values you give must be the ones the services use: `DB_USERNAME` and `DB_PASSWORD` (MySQL), `REDIS_PASSWORD`, `RABBITMQ_USERNAME` and `RABBITMQ_PASSWORD` of the service env files. **MySQL and RabbitMQ apply their password (and RabbitMQ its user) only when their data is first created**, so typing different ones later changes nothing for them; a non-root MySQL user is created or updated on every MySQL deploy (`infra/mysql/ensure-user.sh`); for root use `ALTER USER`.
 
 ### Connecting to MySQL from your computer (Workbench)
-MySQL's port is closed to the internet by default (the services use the docker network). To connect directly, tick `deploy_mysql` and fill in:
-- `mysql_remote_ips`: **your own public IP address** (find it with `curl https://api.ipify.org`), or a network such as `203.0.113.0/24`. A home or mobile address changes now and then: run again with the new one. Anything wider than a /16, "everyone" and IPv6 are refused.
-- `mysql_remote_user` (default `dba`) and `mysql_remote_password` (at least 12 characters): the login you type in Workbench. It has every privilege, and works only from the listed addresses.
+MySQL's port for tools outside the server is **`mysql_port` (4567 by default)** and it is **closed until you give `mysql_remote_ips`**: your own public IP address (find it with `curl https://api.ipify.org`), or a network such as `203.0.113.0/24`, comma separated. Tick `deploy_mysql` to open it. Then, from a listed address, connect in Workbench with a normal Standard TCP/IP connection: host = the server, port `4567`, user `root` (or the MySQL user you set), password = the MySQL password. Anything wider than a /16, "everyone" and IPv6 are refused.
 
-Then in Workbench: Standard TCP/IP, host = the server, port `3306`, that user and password.
+How it is limited: the port is open to the internet (docker publishes it around the firewall), so MySQL itself refuses everyone else, and it checks the caller's address **before** the password: a stranger gets "Host ... is not allowed to connect" and never reaches a password prompt. `root` and the service user are valid only from the server's docker network (where the services run), from the machine itself and from the listed addresses.
 
-How it is protected: the port is open to the internet (docker publishes it around the firewall), so MySQL itself refuses everyone else, and it checks the caller's address **before** the password: a stranger gets "Host ... is not allowed to connect" and never reaches a password prompt. `root` and the service user are limited to the server's docker network, where the services run, so they cannot be used from outside at all. **An empty list closes the port again** when MySQL is deployed. A tunnel (`ssh -L 3307:127.0.0.1:3306 root@<server>`) needs none of this and works from any address.
+- **Your IP changed?** Run again with the new address and tick **`update_mysql_access`** (no restart of MySQL needed). The old address stops working at once.
+- **Close the port:** tick `deploy_mysql` with `mysql_remote_ips` empty.
+- A different port: change `mysql_port` and tick `deploy_mysql`. The usual service ports (3306, 6379, ...) are refused.
+- A tunnel (`ssh -L 3307:127.0.0.1:4567 root@<server>`) needs none of this and works from any address, as long as the port is published (it is on 127.0.0.1 even when closed to the outside).
 
 ### The RabbitMQ management page
 With `rabbitmq_domain` the workflow publishes `https://<domain>` (the management web UI, container `rabbitmq:15672`) through the nginx edge; you sign in with the RabbitMQ user and password. Add an `A` record for the domain (the wildcard `A *` already covers a subdomain). Its certificate is requested from Let's Encrypt like any other host's: the domain must point to this server and port 80 must be reachable. If that fails the run shows a warning; fix the cause and run again. Because the page can administer the message broker, set `rabbitmq_allowed_ips` to your own addresses if you can. To take it down: `nginx-route remove --host <domain>` on the server.
 
 ### Do you need a bind address?
-No. The apps reach Redis, RabbitMQ and MySQL through the docker network, which does not use the published ports at all. Redis and RabbitMQ stay on `127.0.0.1` (this machine only); MySQL's port opens only through `mysql_remote_ips`, above. The RabbitMQ management port (15672) is always local; the page is published separately through nginx.
+No. The apps reach Redis, RabbitMQ and MySQL through the docker network, which does not use the published ports at all. Redis and RabbitMQ stay on `127.0.0.1` (this machine only); MySQL's port (`mysql_port`) opens only through `mysql_remote_ips`, above. The RabbitMQ management port (15672) is always local; the page is published separately through nginx.
 
 ## 2. Each app publishes itself: `nginx-route`
 

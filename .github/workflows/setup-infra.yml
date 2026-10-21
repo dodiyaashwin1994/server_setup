@@ -38,7 +38,7 @@ on:
         type: boolean
         default: false
       deploy_mysql:
-        description: "Deploy / redeploy MySQL (restarts it; data is kept). This also applies mysql_remote_ips below: an empty list closes the port"
+        description: "Deploy / redeploy MySQL (restarts it; data is kept). This also opens the port for mysql_remote_ips, or closes it when that is empty"
         type: boolean
         default: false
       deploy_redis:
@@ -57,18 +57,18 @@ on:
         description: "MySQL password of that user, also root's (empty = keep). Only set on the very first start of MySQL; see the README"
         type: string
         required: false
+      mysql_port:
+        description: "Port on the server that leads to MySQL for tools outside (e.g. Workbench). It is only open when mysql_remote_ips is set. Inside the server MySQL stays on 3306"
+        type: string
+        default: "4567"
       mysql_remote_ips:
-        description: "Addresses allowed to connect to MySQL from outside (e.g. 203.0.113.7 or 203.0.113.0/24, comma separated). Empty = the port stays closed. Used when MySQL is deployed"
+        description: "Addresses allowed to connect to MySQL from outside (your public IP, e.g. 203.0.113.7 or 203.0.113.0/24, comma separated). Empty = nobody from outside and the port stays closed"
         type: string
         required: false
-      mysql_remote_user:
-        description: "Login for those addresses (never root; root only works inside the server's docker network)"
-        type: string
-        default: dba
-      mysql_remote_password:
-        description: "Password of that login, at least 12 characters (empty = keep). Required when mysql_remote_ips is set"
-        type: string
-        required: false
+      update_mysql_access:
+        description: "Only apply mysql_remote_ips to MySQL's accounts, without restarting it (use it when your IP changes). Opening or closing the port itself needs deploy_mysql"
+        type: boolean
+        default: false
       redis_password:
         description: Redis password (empty = keep)
         type: string
@@ -120,9 +120,9 @@ jobs:
       DEPLOY_RABBITMQ: ${{ inputs.deploy_rabbitmq }}
       MYSQL_USERNAME: ${{ inputs.mysql_username }}
       MYSQL_PASSWORD: ${{ inputs.mysql_password }}
+      MYSQL_PORT: ${{ inputs.mysql_port }}
       MYSQL_REMOTE_IPS: ${{ inputs.mysql_remote_ips }}
-      MYSQL_REMOTE_USER: ${{ inputs.mysql_remote_user }}
-      MYSQL_REMOTE_PASSWORD: ${{ inputs.mysql_remote_password }}
+      UPDATE_MYSQL_ACCESS: ${{ inputs.update_mysql_access }}
       REDIS_PASSWORD: ${{ inputs.redis_password }}
       RABBITMQ_USERNAME: ${{ inputs.rabbitmq_username }}
       RABBITMQ_PASSWORD: ${{ inputs.rabbitmq_password }}
@@ -136,7 +136,7 @@ jobs:
       - name: Check the values
         run: |
           # keep typed passwords out of the logs
-          for v in MYSQL_PASSWORD MYSQL_REMOTE_PASSWORD REDIS_PASSWORD RABBITMQ_PASSWORD; do [ -z "${!v}" ] || echo "::add-mask::${!v}"; done
+          for v in MYSQL_PASSWORD REDIS_PASSWORD RABBITMQ_PASSWORD; do [ -z "${!v}" ] || echo "::add-mask::${!v}"; done
           [ -n "$HOST" ] || { echo "::error::Give the server's IP address (input server_host)."; exit 1; }
           [[ "$MYSQL_USERNAME" =~ ^[A-Za-z0-9_]{0,32}$ ]] || { echo "::error::The MySQL user must be letters, digits and _ (at most 32)."; exit 1; }
           [ -z "$RABBITMQ_DOMAIN" ] || [[ "$RABBITMQ_DOMAIN" =~ ^([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]] || { echo "::error::The RabbitMQ domain is not a host name (e.g. rabbitmq.example.com)."; exit 1; }
@@ -145,7 +145,8 @@ jobs:
           # this folder is synced with --delete: it must be a folder of its own, two levels deep at least (/opt/infra), never a system folder
           [[ "$INFRA_ROOT" =~ ^/[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+$ ]] || { echo "::error::The infra folder must be an absolute path without spaces, at least two levels deep (e.g. /opt/infra)."; exit 1; }
           case "$INFRA_ROOT" in /usr/*|/etc/*|/var/*|/bin/*|/sbin/*|/lib*|/boot/*|/root/*|/home|/home/) echo "::error::$INFRA_ROOT is a system folder: use a folder of its own such as /opt/infra."; exit 1 ;; esac
-          [ -z "$MYSQL_REMOTE_IPS" ] || [ "$DEPLOY_MYSQL" = true ] || echo "::warning::mysql_remote_ips is only applied when deploy_mysql is ticked: it is ignored in this run."
+          [[ "$MYSQL_PORT" =~ ^[0-9]{4,5}$ ]] || { echo "::error::mysql_port must be a number such as 4567."; exit 1; }
+          [ -z "$MYSQL_REMOTE_IPS" ] || [ "$DEPLOY_MYSQL" = true ] || [ "$UPDATE_MYSQL_ACCESS" = true ] || echo "::warning::mysql_remote_ips is only applied when deploy_mysql (or update_mysql_access) is ticked: it is ignored in this run."
           S=""; for v in NGINX CERTBOT MYSQL REDIS RABBITMQ; do n="DEPLOY_$v"; [ "${!n}" != true ] || S="$S $(echo $v | tr A-Z a-z)"; done
           [ "$PREPARE_SERVER" = true ] && echo "Server will be prepared." || true
           echo "Services to (re)deploy:${S:- none (the files and nginx-route are updated only)}"
@@ -193,7 +194,7 @@ jobs:
             else
               echo "No service ticked: nothing redeployed."
             fi
-            if [ "$DEPLOY_MYSQL" = true ]; then
+            if [ "$DEPLOY_MYSQL" = true ] || [ "$UPDATE_MYSQL_ACCESS" = true ]; then
               echo "Waiting for MySQL..."
               for i in \$(seq 1 60); do [ "\$(docker inspect -f '{{.State.Health.Status}}' mysql 2>/dev/null)" = healthy ] && break; sleep 3; done
               set -a; . ./.env; set +a
