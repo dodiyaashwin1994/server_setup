@@ -4,6 +4,7 @@
 #
 #   service user   MYSQL_USERNAME: root, or another name that is created here with every privilege (the services create one database per account).
 #   remote access  MYSQL_REMOTE_IPS: the addresses that may log in from outside, as root / the service user, with the normal password. Empty = nobody from outside.
+#                  `any` = everyone (the accounts are valid from any address; only the password protects them).
 #
 # With addresses the MySQL port is open to the internet (docker publishes it around the firewall), so MySQL itself refuses everyone else: it checks the address of the caller BEFORE the
 # password, so a stranger gets "Host ... is not allowed to connect" and never reaches a password prompt. root and the service user are therefore only valid from the docker network `public`
@@ -21,11 +22,12 @@ print(str(n.network_address) if n.prefixlen == 32 else f'{n.network_address}/{n.
 PY
 }
 
-remote_hosts=(); for ip in ${REMOTE_IPS//,/ }; do remote_hosts+=("$(host_of "$ip")"); done
+remote_hosts=(); open_to_all=""
+if [ "$REMOTE_IPS" = any ]; then open_to_all=1; remote_hosts=('%'); else for ip in ${REMOTE_IPS//,/ }; do remote_hosts+=("$(host_of "$ip")"); done; fi
 docker_hosts=()
 subnets="${DOCKER_SUBNETS-$(docker network inspect public -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true)}"
 for s in $subnets; do [[ "$s" == *.* ]] && docker_hosts+=("$(host_of "$s")"); done
-if [ ${#remote_hosts[@]} -gt 0 ] && [ ${#docker_hosts[@]} -eq 0 ]; then
+if [ ${#remote_hosts[@]} -gt 0 ] && [ -z "$open_to_all" ] && [ ${#docker_hosts[@]} -eq 0 ]; then
   echo "Cannot find the IPv4 subnet of the docker network 'public': not opening MySQL to the internet without it (the services could not log in any more)" >&2; exit 1
 fi
 
@@ -41,7 +43,8 @@ users=(root); [ "$SERVICE_USER" = root ] || users+=("$SERVICE_USER")
 sql=""
 for u in "${users[@]}"; do
   pw="$MYSQL_ROOT_PASSWORD"; [ "$u" = root ] || pw="$MYSQL_PASSWORD"
-  if [ ${#remote_hosts[@]} -gt 0 ]; then desired=("${docker_hosts[@]}" "${remote_hosts[@]}"); else desired=(${docker_hosts[@]+"${docker_hosts[@]}"}); fi
+  if [ -n "$open_to_all" ]; then desired=('%')
+  elif [ ${#remote_hosts[@]} -gt 0 ]; then desired=("${docker_hosts[@]}" "${remote_hosts[@]}"); else desired=(${docker_hosts[@]+"${docker_hosts[@]}"}); fi
   if [ "$u" != root ] && [ ${#remote_hosts[@]} -eq 0 ]; then desired+=('%'); fi          # port closed: the service user keeps working from any container
   for h in ${desired[@]+"${desired[@]}"}; do sql+="$(account "$u" "$h" "$pw")"$'\n'; done
   # accounts of this user that are no longer wanted: the "any address" one when the port is open, addresses that left the list. The machine itself (localhost) always stays.
@@ -57,7 +60,9 @@ done
 sql+="FLUSH PRIVILEGES;"
 
 $MYSQL_CMD <<< "$sql"
-if [ ${#remote_hosts[@]} -gt 0 ]; then
+if [ -n "$open_to_all" ]; then
+  echo "mysql: OPEN TO EVERYONE: ${users[*]} may log in from any address; only the password protects them."
+elif [ ${#remote_hosts[@]} -gt 0 ]; then
   echo "mysql: ${users[*]} may log in from: ${REMOTE_IPS}, the docker network (${docker_hosts[*]}) and this machine. Nobody else is let in."
 else
   echo "mysql: no login from outside (${users[*]}); service user ${SERVICE_USER}"

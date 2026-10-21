@@ -4,7 +4,7 @@
 A value typed in the workflow wins; a value left empty keeps the one in the .env already on the server (the workflow fetches it to infra/.env.server first), so a run that redeploys
 one service does not need every password again. Only what is neither typed nor on the server is an error.
 
-MySQL's port (MYSQL_PORT, 4567 by default, published for tools outside the server): closed (127.0.0.1) unless MYSQL_REMOTE_IPS lists the addresses that may connect. The list is applied when MySQL
+MySQL's port (MYSQL_PORT, 4567 by default, published for tools outside the server): closed (127.0.0.1) unless MYSQL_REMOTE_IPS lists the addresses that may connect, or says `any` (everyone). The list is applied when MySQL
 is deployed (DEPLOY_MYSQL=true; an empty list closes the port) or when only its accounts are updated (UPDATE_MYSQL_ACCESS=true, no restart; opening or closing the port itself needs a deploy).
 Redis and RabbitMQ stay on 127.0.0.1.
 """
@@ -46,9 +46,14 @@ def need(name, label):
 
 
 def networks(text):
-    """The IPv4 addresses / networks of MYSQL_REMOTE_IPS, normalised. Never everyone, never IPv6."""
+    """The IPv4 addresses / networks of MYSQL_REMOTE_IPS, normalised; or ['any'] for the keyword `any` (open to everyone, on purpose). Never IPv6."""
     found = []
-    for item in [t for t in re.split(r'[\s,;]+', text.strip()) if t]:
+    items = [t for t in re.split(r'[\s,;]+', text.strip()) if t]
+    if any(t.lower() in ('any', '*') for t in items):
+        if len(items) > 1:
+            sys.exit('mysql_remote_ips: "any" means everyone and cannot be combined with addresses')
+        return ['any']
+    for item in items:
         try:
             net = ipaddress.ip_network(item, strict=False)
         except ValueError:
@@ -98,7 +103,7 @@ def main():
     # single quotes: docker compose then takes the value literally ($, #, spaces and all)
     (ROOT / '.env').write_text('\n'.join(f"{k}='{v}'" for k, v in pairs) + '\n')
     (ROOT / '.env').chmod(0o600)
-    print(f'wrote infra/.env; MySQL port {port}: ' + (f'for {", ".join(ips)} only' if ips else 'closed (127.0.0.1)') + ('' if deploy_mysql or update_access else ' [as already configured: MySQL is not being redeployed]'))
+    print(f'wrote infra/.env; MySQL port {port}: ' + (('OPEN TO EVERYONE (only the password protects it)' if ips == ['any'] else f'for {", ".join(ips)} only') if ips else 'closed (127.0.0.1)') + ('' if deploy_mysql or update_access else ' [as already configured: MySQL is not being redeployed]'))
 
 
 if __name__ == '__main__':
