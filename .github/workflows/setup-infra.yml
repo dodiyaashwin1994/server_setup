@@ -63,6 +63,7 @@ on:
         description: "E-mail address for Let's Encrypt (it writes to it before a certificate expires)"
         type: string
         required: true
+        default: dodiyaashwin1994@gmail.com
       acme_staging:
         description: "Use Let's Encrypt's test service (certificates browsers do not trust, no rate limits): to try the first deploys. Leave off for real use"
         type: boolean

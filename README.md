@@ -18,7 +18,7 @@ The shared part of a server that hosts several apps: the **nginx edge**, **certb
 | `rabbitmq_username`, `rabbitmq_password` | RabbitMQ login. |
 | `rabbitmq_domain` | Host name of the RabbitMQ management page (the web UI), e.g. `rabbitmq.ailease.tech`. Empty = not published. |
 | `rabbitmq_allowed_ips` | Addresses allowed to open that page, e.g. `203.0.113.0/24,198.51.100.7`. Empty = everyone who knows the login. |
-| `acme_email` | E-mail address for Let's Encrypt (required): it writes there before a certificate expires. |
+| `acme_email` | E-mail address for Let's Encrypt: it writes there before a certificate expires. Prefilled with `dodiyaashwin1994@gmail.com`. |
 | `acme_staging` | Tick it to use Let's Encrypt's test service while trying things out (its certificates are not trusted by browsers, but it has no rate limits). Leave it off for real use. |
 | `*_bind_address` | Address the published port of MySQL / Redis / RabbitMQ listens on. **Leave `127.0.0.1`** (see below). |
 
